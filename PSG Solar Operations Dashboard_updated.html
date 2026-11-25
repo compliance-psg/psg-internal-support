@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSG Solar Operations Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230F2E38'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23F2A900'/%3E%3C/svg%3E">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@1,9..144,400..600&display=swap" rel="stylesheet">
+
+    <!-- React & ReactDOM (UMD Production) -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
+    <!-- Recharts -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                    grotesk: ['"Space Grotesk"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Dark theme: #071C25 ground · #0C2E3C boxes · #F2A900 accent */
+        body {
+            background-color: #071C25;
+            color: #EAF0F2;
+            font-family: 'Space Grotesk', sans-serif;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .psg { font-feature-settings: "tnum" 1; }
+        .psg .lbl { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #93A9B2; font-weight: 600; }
+        .psg .it { font-family: 'Fraunces', Georgia, serif; font-style: italic; font-weight: 500; }
+        .psg .fade { animation: fadeUp .35s cubic-bezier(.22,1,.36,1) both; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        /* Tab changes: content slides in from the direction of travel */
+        .psg .slide-r { animation: slideR .32s cubic-bezier(.22,1,.36,1) both; }
+        .psg .slide-l { animation: slideL .32s cubic-bezier(.22,1,.36,1) both; }
+        @keyframes slideR { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+        @keyframes slideL { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+        /* Amber underline glides under the active tab */
+        .psg .tab-ind { transition: left .3s cubic-bezier(.22,1,.36,1), width .3s cubic-bezier(.22,1,.36,1); }
+        @media (prefers-reduced-motion: reduce) { .psg .fade, .psg .slide-r, .psg .slide-l { animation: none; } .psg .tab-ind { transition: none; } }
+
+        .psg .trow { border-bottom: 1px solid #31495A; cursor: pointer; transition: background .15s; }
+        .psg .trow:hover { background: rgba(242,169,0,.07); }
+        .psg button:focus-visible, .psg tr:focus-visible, .psg input:focus-visible, .psg select:focus-visible, .psg a:focus-visible {
+            outline: 2px solid #F2A900;
+            outline-offset: 2px;
+        }
+        .psg .seg { transition: background .15s, color .15s; }
+        .psg .seg:hover { color: #EAF0F2; }
+        .psg input::placeholder { color: #7E96A0; }
+        .psg .btnp { transition: background .15s; }
+        .psg .btnp:hover { background: #D99600; }
+        .psg .btng { transition: border-color .15s; }
+        .psg .btng:hover { border-color: #93A9B2; }
+        .psg .hbd { transition: border-color .15s; }
+        .psg .hbd:hover { border-color: rgba(234,240,242,0.55); }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #071C25; }
+        ::-webkit-scrollbar-thumb { background: #31495A; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4A6478; }
+
+        .cell { transition: transform .12s, outline-color .12s; }
+        .cell:hover { transform: scale(1.2); outline: 1px solid #EAF0F2; z-index: 10; }
+
+        /* Custom Native Select styling */
+        .psg-select {
+            background-color: #071C25;
+            border: 1px solid #31495A;
+            color: #EAF0F2;
+            padding: 0.375rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            outline: none;
+        }
+        .psg-select:focus { border-color: #F2A900; }
+    </style>
+</head>
+<body class="psg min-h-screen">
+    <div id="root"></div>
+
+    <script>
+        // Pre-alias React functions
+        const e = React.createElement;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
+        const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, Cell } = Recharts;
+
+        /* ---- Silence ResizeObserver loop error warnings ---- */
+        (() => {
+            const isRO = m => /ResizeObserver loop/i.test(String(m || ''));
+            window.addEventListener('error', e => { if (isRO(e.message)) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+            window.onerror = (msg) => isRO(msg) ? true : undefined;
+            if (window.ResizeObserver && !window.ResizeObserver.__psg) {
+                const RO = window.ResizeObserver;
+                const Patched = class extends RO {
+                    constructor(cb) {
+                    super((entries, obs) => {
+                    window.requestAnimationFrame(() => {
+                    try { cb(entries, obs); } catch (err) { if (!isRO(err && err.message)) throw err; }
+                    });
+                    });
+                    }
+                };
+                Patched.__psg = true;
+                window.ResizeObserver = Patched;
+            }
+        })();
+
+        /* ---- Config & Colors ---- */
+        const SHEET_ID = '1eQY97jPfa4Jq0NIk4nj9S2mMC7mmFlR2AURTPxWlKvM';
+        const GID = { open: '1458758797', completed: '527809031', compliance: '1033364036' };
+        const SHEET_LINK = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
+        const C = { bg: '#071C25', panel: '#0C2E3C', panel2: '#143C4D', line: '#31495A', text: '#EAF0F2', muted: '#93A9B2', acc: '#F2A900', teal: '#54C6A9', red: '#E86552', blue: '#74A9DC', violet: '#B3A0E3', dark: '#0F2E38', onDark: '#EAF0F2', onDarkMuted: '#A7BCC0' };
+        const DAY = 864e5;
+        const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        /* ---- Embedded Fallback Snapshots ---- */
+        const FL = ["App issue","Backup","Battery","Bill Savings","Damage to Property","EV Charger","Inverter","Others","Roof Leak","Solar Panel","Whole System"];
+        const ML = ["AlphaESS","Empower","Enphase","Eveready","FoxESS","Fronius","GoodWe","LG","Other","SAJ","SigEnergy","SolarEdge","Sungrow","Tesla","iStore"];
+        const SL = ["Aircon","Battery Only","EV Charger","Electric Hot Water","Other","Solar & Battery","Solar Only"];
+        const SNAP_COMPLETED = `11201|David Worsham|261104||10|10|5~13229|Micheal Rand|261103|260420|2|10|5~17831|Ron Croyden|261102|261102|7|6|5~17669|Naomi Metzl|261102|261028|7|0|1~17754|Micky Nachom|261102|261030|7|4|5~17648|Pieter de Bruyn|261102|261023|1|2|1~17759|Turner, Christian|261102|261030|2|10|5~17629|Venky Krishnamuthy|261030|261028|7|9|5~17372|Franc Violi|261029|261019|7|6|5~17669|Naomi Metzl|261028|261028|1|0|1~16795|Andrea McDonnell|261028|260928|6|0|5~17351|Penelope Oerlemans|261028|261016|7||1~17605|Michael Jaloussis|261028|261026|7|0|1~17603|Gordan Griffith|261027|261026|6|2|1~17425|Nicholas Joukhdar|261027|261019|7|6|1~17634|Bill Velovski|261027|261027|7|10|1~16669|Venu Jagata|261027|261024|2|12|6~3331|Li Ping|261023|261008|2|13|4~13740|Matthew Duffy|261027|260921|7|10|5~17608|Cindy Lam|261027|261026|2|6|~17607|Gordon Nagle|261027|261026|7|2|1~17252|Ben Roddy|261026|261013|7||5~16103|Adam Camilleri|261026|260907|7|6|1~13084|Elisabeth Hanrahan|261023|260831|9|13|5~17395|Tony Padman|261023|261019|0|10|1~17462|Rosslyn Menzies|261023|261020|3|0|1~17379|Robert Mandarano|261022|261019|7|10|1~17338|Anthony O'Flynn|261022|261016|||1~17407|Long Le|261022|261019|7|0|5~17398|Deborah Hanna|261022|261019|0|6|5~16948|Chaminda Lewis|261022|261006|6|2|6~16984|Janet Kossy|261021|261006|6|2|1~15926|Donna McIvor|261020|260921|6|10|5~17450|Joseph Banta|261020|261020|5|6|5~17081|Charles Chen|261020|261008|7|6|5~16924|Antonius Ade|261020|261006|7|10|5~16481|Howard Spencer|261020|261019|0|10|5~16641|Rommel Buitizon|261019|260923|7||1~13419|Combis, Gary|261019|260911|7|4|5~17242|Dee Lotrian|261019|261013|7|2|1~15655|Colin Butt|261019|260819|9|10|5~15926|Donna McIvor|261015|260721|7|10|1~15237|Belinda|261008|260828|6|11|6~13289|Nathan Carlini|261015|260423|9|10|5~17228|Di Wu|261015|261013|7|6|1~17240|Ben Prag|261015|261013|7||5~16641|Rommel Buitizon|260924|260923|7||5~16331|Jonathan Yang|260925|260914|1|12|5~15076|Marsha Ma|261014|260930|7|12|5~17239|Luke Scott|261014|261013|7|10|5~17189|Amar Singh|261012|261012|0|6|5~17207|Phil Bates|261012|261012|7|6|0~17183|John Locke|261012|261012|7|6|1~17190|Aliza Adam|261012|261012|0|6|~16927|Penelope Oerlemans|261012|261006|7||4~13360|Ren Shao|261009|261009|10|4|~10359|Andreas Niederegger|261009|260721|7|0|5~17081|Charles Chen|261009|261008|3|6|5~17125|Kim Emerton|261009|261009|7|6|5~16652|Garry Ibbotson|261009|260923|7|2|1~15597|Barakat, Gaby (Adonis Barakat)|261009|260924|7||4~16317|Julian Farrugia|261009|260914|7|10|4~11597|Walt Thompson|261009|260930|7|10|1~16939|Luis Sarmiento|261009|261006|1|10|1~16832|Hamid Chaifroosh|261009|260929|0|6|5~12683|Dylan Cook|261008|260928|7|4|5~16663|Vener Martin|261008|260924|7|12|5~16672|Liu, Richard|261002|260924|7|12|6~17017|Daniel Poole|261006|261006|7|6|5~16755|Matthew Irla|261006|260928|0|12|6~16743|Nina Pereira|261006|260928|||5~16669|Venu Jagata|261006|260924|7|12|6~17006|Joe Amoroso|261006|261006|0|6|5~13953|Catherine Jones|261006|261003|0|0|5~16665|Des Dockery|261002|260924|9|5|1~16884|Andrew Gustafson|261002|260901|7|0|5~16695|Jennifer Winsor|261002|260925|7||1~14196|Guo, Darius|261002|260922|7|12|5~15848|David Fisher|261002|260826|6|2|5~16911|Nick KUK|261002||7|0|~15882|Donald byron|261002|260828||2|5~11079|Robert Mellor|261002|260819|7|0|5~16616|Andre Pinantoan|261002|260923|2|6|5~13498|Kanesarajah Sritharan|261001|260721|7|10|5~16695|Jennifer Winsor|260930|260925|7|13|1~16696|Matt Ferro|260928|260918|7|6|6~16627|Paul kouklidis|260928|260923|0|6|5~14893|Jung Park|260928|260923|||4~15050|George Loard|260928|260707|1|0|5~15150|Yolanda Polad|260925|260727|3|6|5~16577|Manju Uprety|260925|260721|7|6|5~11051|Emile Chidiac|260925|260916|7|0|5~16002|Eric Lam|260903|260903|2|10|1~16002|Eric Lam|260925|260903|6|10|5~15109|David Wilshire|260925|260724|7|14|1~16449|Minna Howlett|260924|260917|7|9|5~15999|Joel Cappelli|260923|260903|7|5|6~15996|Lucy Chen|260923|260903|2|10|1~16123|Jay Montgomery|260922|260908|7||5~16575|Richard Dibden|260922|260921|7|0|1~12118|Nicolae, Nita|260922|260916|7|0|1~16110|Vanessa Moss|260921|260907|1|10|1~16461|Carl Johnston|260921|260918|7|6|5~16451|Shane McCloskey|260721|260717|7|6|5~14224|Roxanne Wain|260918|||6|5~14018|Maurice Lombardi|260918|260907|7|0|5~14224|Roxanne Wain|260918|260825|7||4~15166|Gary Browne|260918|260817|6|0|5~15597|Barakat, Gaby (Adonis Barakat)|260918|260709|7||4~2046|Classic Quarters|260915|260910|6|12|6~16161|Warwick Edwards|260717|260709|7|2|5~11395|Long Le|260717|260717|7|6|4~14365|Denice Chu|260717|260717|7|6|5~15926|Donna McIvor|260909|260831|7|10|5~16165|Sammy Isreb|260916|260909|7|5|5~15640|Anna Rowntree|260915|260819|7|2|5~16285|Irawan Li|260915|260914|7|6|5~15947|Thi Huynh Dao Do|260915|260831|7|6|5~11674|Rodney Begley|260915|260824|7|1|5~16114|Gary Payne|260915|260907|1|10|5~14213|Bernadette Ponce|260914|260907|7|6|5~12144|Andrew Lewis|260909|260907|6|9|5~8208|Brad Fittler|260914|260819|6|13|5~15423|Harish Rajak|260914|260907|7|6|5~12118|Nicolae, Nita|260914|260907|7|0|1~13425|Carolyn Varney|260914|260910|7|14|3~15959|Xiaohui Fu|260914|260902|1|0|5~11044|Craig Sinclair|260910|260901|7|9|5~15543|Con Sikallos|260910|260813|7||4~16065|Paula Grant|260909|260907|2|6|5~15980|Olive Barry|260909|260902|7|6|1~15818|Glenn McCarthy|260904|260825|7|2|5~13419|Combis, Gary|260904|260901|7|4|5~15432|Stuart Woodward|260904|260910|6|2|5~13498|Kanesarajah Sritharan|260904|260817|2|10|5~15846|Maldev Hothi|260904|260826|7|10|6~15783|Peter Faherty|260903|260824|6|10|1~14640|Gareth Lloyd|260903|260817|3|0|5~14971|Peter Miller|260903||7|10|5~15982|Gloria Morson|260903|260902|0|10|5~15500|Chris Thatcher|260902|260813|7|13|5~14950|Shalin Mehrishi|260902|260716|6|5|6~15863|Adam Camilleri|260902|260827|7|6|5~14365|Denice Chu|260902|260901|2|6|5~13502|Nick Miller|260818|260505|6|4|5~15520|Laila Daqiq|260901|260812|0|12|5~15678|Jennifer Begnell|260831|260820|2|0|5~14699|Miriam Koletti|260831|260828|3|6|5~15860|Michael Nesci|260831|260828|7|12|5~6325|Louca, George|260831|250701|2|3|1~13623|Tony Nguyen|260828|260615|2|0|5~10485|Tran, Jason|260828|260814|7||5~15679|Stephen Gorman|260827|260820|7|6|5~14954|Andrew willows|260827|260816|7|2|5~11193|John Deller|260820|260624|2|7|1~14808|Greg Bennan|260820|260710|2|0|5~13892|Justin Joseph|260827|260715|7|2|5~14007|Vong Sinbandhit|260826|260604|1|12|5~10285|Craig Sinclair|260825|260209|6|9|5~15708|Jai Leigh|260824|260821|0|2|5~15613|Ian Renn|260824|260818|7|2|5~15597|Barakat, Gaby (Adonis Barakat)|260824|260817|7||4~11278|Karen love|260824|260729|7|0|5~14724|Tony Pandher|260824|260708|10|10|5~10382|Andrew Maclaurin|260729|260119|8|2|5~13922|Christopher Gross|260820|260601|7|2|5~15211|Peter Sakirman|260811|260730|6|2|5~14785|Martin Moore|260820|260709|3|0|5~8634|Richard Yang|260819||7||4~14410|Bass Graham|260819||3|6|1~15314|Len De Lorenzo|260819|260804|2|2|5~15538|Kim Martin|260819|260813|6|10|5~13655|George Ferenc|260818|260512|1|13|1~13268|Viral Suchde|260818|260615|7|10|5~14165|Thomas Weedon|260818|260615|1|6|5~13502|Nick Miller|260818|260505|7|4|5~4754|Lane Cove Medical Practice|260814|260803|7|12|5~15556|Ahmad El cheikh|260814|260814|7|0|1~15410|Tuitu'u, Samuela|260814|260807|7|12|5~13646|Amit Ramdev|260813|260514|4|13|5~13279|Timothy McCarthy|260813|260429|4|2|5~15365|Sotiris Vorlow|260813||6|6|5~15359|Suzanne Flaherty|260813|260806|7|6|5~13425|Carolyn Varney|260811|260728|7|14|3~13810|Angel Szeto|260811|260522|2|2|1~14365|Thanh Nguyen|260811|260710||6|5~15481|Joseph Hauser|260811|260804|10|2|5~13810|Angel Szeto|260811|260619|2|2|5~15210|Mandy Jacobs|260805||0|10|5~15166|Gary Brown|260805|260728|7|0|5~15087|Xiaoyan Fu|260805|260723|2|0|5~14244|Robbie Messit|260804|260713|9|0|5~15009|George Kafo|260804|260720|7|12|6~14640|Gareth Lloyd|260804|260606|2|0|1~15157|Sajan Shrestha|260804|260727|7|6|4~15107|Zia Ahmad|260804|260724|10|10|5~14971|Peter Miller|260804|260727||10|5~12674|Chris Moran|260804|260524|9|5|5~15241|Rosanna Caltabiano|260804||0|6|5~15245|Joanne Northam|260804|260731|2|12|5~15050|George Lord|260731||3|0|5~14065|Ozcan Aydin|260730||7||4~14003|Brandon Lai|260729|260604|7|2|5~14893|Jung Park|260729|260714|0|6|5~15093|mark Galea|260729|260723|2|2|1~11674|Rodney Begley|260729|260727|2|1|1~12060|Tony Yortis|260727|260602|0|10|5~11732|Trevor Walding|260727|260611|7|2|5~14822|Jennifer Ward|260723|260710|6|0|6~13103|Alan Machet|260721|260415|10|0|5~11831|Jamil karaki|260721|260713|2|10|5~14614|Frank Blancato|260721|260703|7|2|1~14260|Dilshan Dodanwela|260721|260619|7|10|1~14246|Priestley, Gary|260721|260618|7|2|4~13984|Rebecca Green|260721|260604|7||5~11595|Irene Gilto|260721|260226|2|7|1~14763|Brooks Harvey|260721|260708|0|1|1~14018|Maurice Lombardi|260721|260606|10|0|4~14951|Hashinda Silva|260721||7|6|4~14764|Terri Mylett|260721|260708|0|6|1~14365|Denice Chu|260713|260708|7|6|5~14489|Joe Varkey|260713|260630|6|10|5~14473|George John|260713|260629|7||5~14065|Ozcan Aydin|260713|260609|3|4|5~11788|Maldev Hothi|260713|250323|7|10|1~14244|Robbie Messitt|260713|260618|6|0|5~14182|Gilberto Legaspi|260713|260616|0|6|5~14009|Peter Johnson|260713|260615|7|12|4~10413|Liza Poppert|260713|260605|10|10|5~11079|Robert Mellor|260713|260703|6|0|5~14699|Miriam Koletti|260713|260708|0|6|1~14409|Morris Ark|260713|260626|5|12|5~12973|Lewis Tait|260708|260703|10|9|5~14170|Adem Yatkin|260708|260708|0|6|5~14453|Dave Davids|260708|260629|7|10|6~14552|David Prior|260708|260702|||5~13359|Jerome Ebuenga|260707|260601|9|0|5~10658|Ehmad Fahmy|260707|260706|2|9|5~13619|Ajith Ranasinghe|260706|260511|0|4|5~14353|Harish Rajak|260706|260629|10|6|5~11134|Jeff Small|260706|260701|0|9|5~13617|Chaminda Lewis|260703|260511|7|13|5~13498|Kanesarajah|260703|260615|6|10|5~14004|Vijay Raghvani|260703|260604|7|13|2~13413|Raymond Lau|260703|260609|10|4|5~9404|Deepak Seth|260703|260629|1|12|5~14332|Greg MacGregor|260703|250322|6|2|5~13535|Lahoud, Anthony|260703|250506|2|9|5~12988|Houman Sahraei|260703|260629|7|0|4~11136|Andrew Murrie|260702|260611|2|10|5~14528|Lynette Horton|260701|260701|0|9|5~14312|Frank Pangallo|260701|260622|7|10|4~13026|Robert Forsterlee|260630|260413|7|10|6~14340|John Holland|260630|260623|2|13|1~13033|Georgina Kernohan|260629|260413|10|10|5~14365|Denise Chu|260625|260624|0|6|5~13474|Mark Small|260625|260602|10|0|5~14224|Roxanne Wain|260624|260617|0|12|5~13700|Anthea Kathir|260624|260609|3|9|4~13334|Greg Powell|260624|260424|7|13|1~14196|Darius Guo|260624|260616|0|12|5~12381|Fadi El Tehan|260624|260611|1|12|5~13007|Slavko Malesevic|260619|260610|7|14|5~13741|Jenn Miller|260619|260525|1|10|5~2410|Ramsey Hajaj|260618|260414|10|2|5~14007|Vong Sinbandhit|260615|260604|1|12|5~12664|Tom Mort|260615|260331|10|9|5~13532|Micheal Bokody|260615|260506|7|6|4~13931|Ross Hyne|260615|260601|8||5~13535|Anthony Lahoud|260612|260506|2|9|5~14018|Maurice Lombardi|260612|260604|6|0|5~11193|John Deller|260612|260408|6|7|1~11840|Don Mckay|260611||10|10|5~14028|Nick giannacopoulos|260610|260605|8||5~13281|Hssan Shahine|260610|260422|10|9|5~13162|Julie Tan|260609|260526|10|4|5~2497|Head Projects|260609|260512|3|11|5~13498|Kanesarajah Sritharan|260609|260514|7|10|5~13814|Diana Temby|260609|260522|7|2|5~13893|Christine Armarego|260605|260528|10|12|5~14009|Peter Johnson|260605|260605|0|12|5~13944|Kuan Vo Poh|260603|260601|0|10|5~13953|Catherine Jones|260603|260601|7||5~13921|Ahmed Rifai|260603|260602|0|6|5~13161|Jaculine Parker|260602|260529|8|0|5~12346|Ian Stewart|260602|260526|||5~13816|Carl Dubois|260602|260525|4|6|5~13719|Jason Byrne|260601|260518|0|2|5~13349|Marko Hallikaine|260529|260428|2|4|5~13898|Marina Vanderwalt|260529|260528|0|2|5~13727|Muhammad Chatta|260528|260518|10|4|5~10385|Walt Thompson|260528|260225|10|10|5~13623|Tony Nguyen|260528|260511|2|0|5~13618|Michael Greenfield|260528|260511|1|4|5~13613|Gordon Nagle|260528|260511|6|2|5~13414|John Douglas|260528|260430|10|4|5~13740|Matthew Duffy|260528|260518|6|10|5~13268|Viral Suchde|260528|260422|10|10|2~12712|Harry pana|260526|260526|7|6|5~13413|Raymond Lau|260526|260430|6|4|5~11630|SR Constructions|260526|260430|10||5~11054|Nicolas Danao|260526|260419|6|9|5~13419|Gary Combis|260526|260430|4|4|5~13700|Anthea Kathir|260526|260514|3|9|5~13807|Manfred Staden|260526|260525|2|9|5~13620|Kevin Duffy|260526|260411|1|10|5~13741|Jenn Miller|260526|260518|10|10|5~13835|Matthew Hampton|260525|260525|2|6|5~13811|Louise Mayor|260525|260525|10||5~13815|Andrew Alice|260525|260525|0|10|5~13615|Rosie Menzies|260522|260511|2|4|5~13235|Matt Hamby|260522|260420|3|10|5~13360|Ren Shao|260522|260428|2|4|5~13384|Deanne Gibbs|260522|260429|7|10|5~13474|Mark Small|260522|260504|10|0|5~12486|Kim Martin|260522|260421|0|10|4~13215|Matthew Hampton|260522|260521|0|4|5~13810|Angel Szeto|260522|260522|0|2|5~11319|Emma Mills|260521|260330|3|9|5~13023|Jaxon Wilson|260521|260521|1|0|5~11639|Steven Demos|260520|260519|0|0|4~12264|Margaret Martin|260520|260520|7|0|5~11901|Eamonn Dillon|260520|260309|2|13|5~13623|Tony Nguyen|260520|260511|6|4|5~13655|George Ferenc|260518|260511|1|13|5~11784|Mark Remnant|260518|260304|3|0|1~13716|Tim Walsh|260518|260515|0|10|5~13531|Greg Cozens|260518|260506|10|2|4~13334|Greg Powell|260515|260424|2|13|1~12988|Houman Sahraei|260515|260409|6|0|5~13625|Kim Crichton|260515|260512|10|11|5~13144|Hong Quan|260514|260415|10|4|5~13026|Robert Forsterlee|260514|260413|0|10|5~13425|Carolyn Varney|260514|260501|10|14|3~3611|Nick Kuk|260512|260416|3|6|5~13468|Richard Phu|260512|260504|10|10|5~13498|Kanesarajah Sritharan|260511|260505|6|10|5~13193|Peter Quinn|260508|260417|0|0|5~11723|Chun Cheung/Evon|260507|260302|2|13|5~11079|Robert Mellor|260507|260303|10|0|5~11630|Nicholas Janu|260507|260504|0|11|5~13380|Kim Son Nguyen|260506|260427|0|10|5~13473|Boris Waldman|260506|260504|7|2|5~13369|Marsha Ma|260501|260428|2|12|5~12267|Yang Yang|260430|260430||13|4~13105|Jaclyn Goh|260430|260415|2|10|5~13233|Joy Gough|260430|260420|0|0|5~13359|Jerome Ebuenga|260430|260428|7|0|5~13160|Brett Philips|260429|260420|0|10|5~13210|Michelle Thistleton|260429|260420|0|10|5~11938|Aaron Renel|260428|260310|9|9|5~13291|Nishith Panthi|260428|260423|0|0|1~12628|Thinh Phan|260428|260330|2|4|5~13032|Robert Dransfield|260424|260413|10|0|5~13007|Slavko Malesevic|260424|260413|10|14|5~8401|Elin Beattie|260424|260313|0|9|1~13023|Jaxon Wilson|260424|260413|4|0|5~12706|Dylan Cook|260423|260401|2|4|5~12664|Matthew Pulver|260421|260331|9|9|5~13162|Julie Tan|260420|260414|10|4|5~11324|Alex Alamedinee|260420||10|12|5~13032|Robert Dransfield|260420|260413|10|0|5~13160|Brett Phillips|260417|260414|10|10|5~13161|Jacquline Parker|260417|260416|0|0|5~13022|George Lu|260414|260413|2|0|5~12973|Lewis Tait|260414|260409|10|9|5~12346|Ian Malcom Stewart|260413|260326|10|12|4~12381|Fadi El Tehan|260410|260324|10|12|5~12453|Ray Stellar|260410|260326|2|0|5~9978|Kanesarajah Sritharan|260409|260409|7|10|5~12413|Adam Nguyen|260409|260324|10|10|5~12329|Connie liu|260408|260323|0|4|1~7592|Stephen Barton|260408|260317|9|10|5~|Roy Limpiado|260407|260407|0|0|1~|Mahes Selvadurai|260407|260407|||~|John Harding|260407|260407|0|0|5~12486|Kim Martin|260402|260327|0|10|5~9404|Deepak Seth|260402|260302|2|0|5~12430|Odran Lipscombe|260402|260402|7||5~11052|Elie Abouhanna|260401||6|13|5~11493|phil shead|260401|260312|2|0|1~12674|Chris Moran|260401|260401|7||6~11784|Alan Dao|260331|260304|7|13|2~11136|Andrew Murrie|260331|260327|8||5~12361|Nick Tan|260327|260323|9|0|1~12361|Nick Tan|260327|260323|9|0|1~9414|Andrew Lewis|260326|260317|1|9|5~4151|Nass Martino|260325|260227|8|12|5~11661|Mel Trehonning|260325|260227|8|0|5~8692|Grant Jones|260325|260306|8|12|5~11984|Stephen Campain|260324|260313|10|10|5~12282|Sreekanth Surampudi|260323|260320|10|12|5~9473|Don Mckay|260320|260306|7|10|4~10791|Jonathan Yang|260320|260320|2|12|5~12134|Brendan Hill|260317|260317|10|12|5~11983|Graham Broadwood|260316|260311|10||5~8984|Maldev Hothi|260316|260304|10|10|5~12060|Tony Yortis|260316|260313|8|10|5~11210|Tim leslie|260316|260306|6|5|5~11943|Evan Barrett|260313|260310|0|10|4~12006|Peter Flanagan|260312|260312|2|2|1~11836|Sue Yates|260311|260306|7|10|4~10384|Nathan So|260310||8|10|5~11848|Christopher Banks|260309|260309|2||1~11831|Jamil Karakis|260309|260306|2|10|5~11493|Phil Shead|260306|260223|2|0|1~10527|Trevor walding|260304|260304|2|2|1~10527|Trevor Walding|260303|260227|10|2|5~7173|Sreekanth Surampudi|260303|260303|3|12|4~11674|Rodney Begley|260302|260227|7|1|5~9085|Kevin Lackersteen|260302|260302|7|10|4~11639|Demos Steven|260227|260226|7|0|4~9188|Thien Duong|260226|251208|6|13|5~11079|Robert Mellor|260224||6|0|5~6124|Keryn Smith|260224|260224|6|12|1~11492|Long Le|260224|260223|6|10|3~14007|Vong Sinbandhit||260604|1|10|5~12638|Paul Scotland||260330|0|0|5~11973|Niusha Abady||260311|0||5~11054|Nicolas Danao|||3|8|5`;
+        const SNAP_OPEN = [{"t":"#13505","n":"Romi Sam","sys":"Solar & Battery","lg":"05/05/2026","up":"01/09/2026 11:43","f":"Inverter","sum":"pv not showing. MSB connected to SAJ subboard connected to enphase","m":"SAJ","st":"Technician Booked","wl":"","wr":"","tech":"","tv":"","nt":"site visit will be schedule to check CT and meter reading"},{"t":"#8208","n":"Brad Fittler","sys":"Solar & Battery","lg":"21/07/2026","up":"28/10/2026 11:43","f":"Whole System","sum":"Issue with the neuro meter","m":"Tesla","st":"Warranty Lodged","wl":"","wr":"1152100-14-J--CN322235G4J00L","tech":"","tv":"","nt":"Tesla arrainging a site to replace the meter. Site visit was done to replace the meter and customer raised the concerned that issue is not fully resolved Tesla…"},{"t":"#13719","n":"Jason Byrne","sys":"Solar & Battery","lg":"28/09/2026","up":"28/10/2026 11:23","f":"Others","sum":"one the micro inverter stopped working After the site visit was done by nathan 21 oct the issue was solved and reporting normal but later o…","m":"Enphase","st":"Technician Booked","wl":"","wr":"","tech":"","tv":"","nt":"Need to book the site visit once the customer receive the micro on his property And Enphase recommnended to add ferrite core coil to reduce the noise."},{"t":"#17233","n":"Mike Rossi","sys":"Solar Only","lg":"13/10/2026","up":"14/10/2026 16:54","f":"Others","sum":"Cx reported that there has been Zero export since installation","m":"Enphase","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":""},{"t":"#16665","n":"Des Dockery","sys":"Solar & Battery","lg":"24/09/2026","up":"14/10/2026 17:03","f":"Inverter","sum":"isolation error keep coming up.","m":"Fronius","st":"Technician Booked","wl":"","wr":"","tech":"","tv":"","nt":"eported to the manufacture and waiting from them to get to back to us with the update cas-2429406-G3R3B5"},{"t":"#17289","n":"Parker, Graham","sys":"Battery Only","lg":"14/10/2026","up":"16/10/2026 11:05","f":"Inverter","sum":"inverter reporting various faults","m":"AlphaESS","st":"Investigating","wl":"WOAP-112178","wr":"","tech":"","tv":"","nt":"The battery breaker is tripping when tried to turn the breaker ON. Probably battery is faulty."},{"t":"#16948","n":"Chaminda Lewis","sys":"","lg":"26/10/2026","up":"26/10/2026 17:08","f":"Solar Panel","sum":"Breakers are tipping please refer the image. #solar breaker on envoy, Main Switch inverter supply and backup gateway isolator.","m":"Enphase","st":"Technician Booked","wl":"","wr":"","tech":"","tv":"","nt":""},{"t":"#17647","n":"Andrew Bott","sys":"Battery Only","lg":"27/10/2026","up":"30/10/2026 16:33","f":"Backup","sum":"#Customer requested to send a quote for back up circuits","m":"Enphase","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":""},{"t":"#17758","n":"Richard Braddock","sys":"Solar & Battery","lg":"30/10/2026","up":"30/10/2026 16:39","f":"Battery","sum":"The battery rack 3 was offline and not turning On and manufacturer approved for replacement","m":"GoodWe","st":"Investigating","wl":"Ticket #2610301045","wr":"","tech":"","tv":"","nt":"Goodwe tech support approved the replacement of the battery"},{"t":"#17815","n":"Sam Zjakic","sys":"Battery Only","lg":"02/11/2026","up":"02/11/2026 12:41","f":"Others","sum":"Cx reported the lights on gateway is flashing orange.","m":"SigEnergy","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":"We can confirm that your system is currently running in normal operating mode, communication is stable, and the solar and battery are performing exactly as exp…"},{"t":"#17822","n":"Slavko Malesevic","sys":"Solar & Battery","lg":"02/11/2026","up":"02/11/2026 12:43","f":"Others","sum":"Customer has two batteries one is Hawaie and other is istore which we installed and Hawaie flasing red","m":"","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":"Regarding your Huawei battery, please note that because this unit was pre-existing and was not supplied or installed by PSG, we do not have installer or monito…"},{"t":"#17825","n":"Karen Greenhill","sys":"Solar & Battery","lg":"02/11/2026","up":"02/11/2026 12:45","f":"Bill Savings","sum":"Customer reports that there is discrepancy in app and the retailer app grid import values","m":"GoodWe","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":"Waiting for the customer to reply to email with photos and brief discription"},{"t":"#17685","n":"Ian Stewart","sys":"Solar & Battery","lg":"29/10/2026","up":"03/11/2026 16:26","f":"Others","sum":"Customer says he wants to prepare for a power outage and Need to supply and install x3 type A rcbo's and collect the remaining balance.","m":"Sungrow","st":"Technician Booked","wl":"","wr":"","tech":"","tv":"","nt":"Need to supply and install x3 type A rcbo's and collect the remaining balance. #Supply and install change over switch for no charge."},{"t":"#17897","n":"Iain Greaves","sys":"Battery Only","lg":"03/11/2026","up":"03/11/2026 16:29","f":"App issue","sum":"Cx reports he is unable to monitor the system and no access to portal","m":"Sungrow","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":"The system is already is associated with the customer's email address and i have forwarded the owners manual to customer for the reference."},{"t":"#17489","n":"Alan Machet","sys":"Solar Only","lg":"04/11/2026","up":"04/11/2026 16:59","f":"Others","sum":"he want us to reinstall the inverter which we removed and add a string.","m":"","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":""},{"t":"#17917","n":"Ron Croyden","sys":"Solar & Battery","lg":"04/11/2026","up":"04/11/2026 17:00","f":"Others","sum":"Cx reported that his inverter is making Nosie","m":"GoodWe","st":"Investigating","wl":"","wr":"","tech":"","tv":"","nt":"It is fan noise, and it is normal operation. We have monitored the system, and it is running in normal mode."},{"t":"#17868","n":"Amanda Neirinckx","sys":"Battery Only","lg":"04/11/2026","up":"04/11/2026 17:04","f":"","sum":"For the issue lodged with Enphase, they have suggested it requires an inspection by a solar technician. It can also be troubleshooted remot…","m":"Enphase","st":"","wl":"","wr":"","tech":"","tv":"","nt":"We are helping the customer to calim under warranty as we are not orginal installer"},{"t":"#17910","n":"Dinesh Divakar","sys":"Battery Only","lg":"04/11/2026","up":"04/11/2026 17:05","f":"Inverter","sum":"Dinesh Diwakar reported Enphase system power outage and tripping isolator","m":"Enphase","st":"","wl":"","wr":"","tech":"","tv":"","nt":"Moon suspect that breaker inside the contoller is falty and will replace it. He be onside between 3 to 4 pm today."},{"t":"#17918","n":"Peter Robertson","sys":"Battery Only","lg":"04/11/2026","up":"05/11/2026 14:50","f":"","sum":"mail enphase support and say we want to pursue this job? We will complete job and invoice enphase for labour. RMA ID BELOW.","m":"","st":"","wl":"","wr":"","tech":"","tv":"","nt":""}];
+        const SNAP_CC = `#15332||Russell Bourne|Enphase|Yes|TRUE|TRUE|~#16303||Nicholas Joukhdar||Yes|TRUE|TRUE|~#15594||Bill Kay|Goodwe|Yes|TRUE|TRUE|~#15206||Nina Pereira|Goodwe|Yes|TRUE|TRUE|~||Adam Camiliri|Goodwe|Yes|TRUE|TRUE|~#16211||Scott Chih|SigEnergy|Yes|TRUE|TRUE|~||Jennifer winsor||Yes|TRUE|TRUE|~||Lina Tsiodras||Yes|TRUE|TRUE|~#16584||Greg Macgregor|Enphase|Yes|TRUE|TRUE|~#16860||Dominic salsiccia|Enphase|Yes|TRUE|TRUE|~#16632||Robert Flack|Enphase|Yes|TRUE|TRUE|~#16593||Naomi Metzl|AlphaESS|Yes|TRUE|TRUE|~#16146||Llia Doshen|Goodwe|Yes|TRUE|TRUE|~#16230||Derek|Goodwe|No|TRUE|TRUE|~#17512||Quang Tran|Goodwe|No|TRUE|TRUE|~#17472||Stephen Liu|Goodwe|Yes|TRUE|TRUE|~#17374||Srikanth Lanka|FoxESS|No|FALSE|TRUE|~#17392||Raj Kumar|FoxESS|No|FALSE|TRUE|~#12275||Peter Robertson|SigEnergy|No|FALSE|TRUE|~#17466||Evelyn Cordatos|Goodwe|No|FALSE|TRUE|~#16455||marianne Brewster|Goodwe|No|FALSE|FALSE|waiting on sb upgrade nass~#16965||Sangh Raj|SigEnergy|No|FALSE|TRUE|quote not updated~#17311||Kevin Luu|SigEnergy|Yes|TRUE|FALSE|waiting on data~#14572||Phoebe Ashton|SigEnergy|No|FALSE|TRUE|~#17103||David Wilmoth|Enphase|Yes|FALSE|TRUE|~#17712||Dennis Smith|FoxESS|No|FALSE|TRUE|~#16930||Mahwash Mian|FoxESS|No|FALSE|TRUE|~#17322||Adeeb Malek|SigEnergy|No|FALSE|TRUE|waiting on data~#17235||John WIlliams|SigEnergy|No|FALSE|TRUE|~#16439||Pieter De Bruyn|Enphase|No|FALSE|TRUE|~#17187||Karena Leung|Goodwe|No|FALSE|TRUE|~#17270||Isabella Pelle|Goodwe|No|FALSE|TRUE|~#13201||Hassan Sleiman|FoxESS|Yes|FALSE|TRUE|~#17526||Frances Monypenny|Enphase|No|FALSE|TRUE|~#17705||James Long|Enphase|Yes|FALSE|TRUE|~#16609||Maree Wilkins|SigEnergy|No|FALSE|TRUE|~#17734||Graham Parker|AlphaESS|No|FALSE|TRUE|~#16990||Tracy Flanigan|SigEnergy|No|FALSE|TRUE|~#17520||Mouin Bek|Goodwe|No|FALSE|TRUE|~#17435||Anoop Chidambaran|Goodwe|No|FALSE|TRUE|~#17352||Carol O Carroll|AlphaESS|No|FALSE|TRUE|~#17327||Mike Crighton|FoxESS|No|FALSE|FALSE|waiting on data~#17736||Jacob Sandoso|FoxESS|Yes|FALSE|TRUE|~#17253||Nadia Ng|SigEnergy|No|FALSE|TRUE|~#14907||Bruce Sanderson|Enphase|No|FALSE|TRUE|~#6294||James Molison|AlphaESS|No|FALSE|TRUE|quote not updated~#17604||Sam Vassallo|Goodwe|No|FALSE|TRUE|~#17665||Damon Cooke|SigEnergy|No|FALSE|TRUE|~#17571||Stuart Cricton|SigEnergy|No|FALSE|TRUE|~#17593||Anjan Das|Goodwe|No|FALSE|TRUE|~#6420||Sagar Mansukh|AlphaESS||FALSE|TRUE|~#17552||Alex Yiannikas|Goodwe||FALSE|TRUE|~#17599||Milton Narajo|SigEnergy|No|FALSE|TRUE|~#17698||Tony Bryant|Goodwe|No|FALSE|TRUE|~#17225||Kevin Tai|Goodwe|No|FALSE|TRUE|~#15986|05/11/2026 15:09|Sokong Moch|Goodwe|No|FALSE|TRUE|~#17903|05/11/2026 15:09|Louella De  los Santos|FoxESS|No|FALSE|TRUE|~#17873|05/11/2026 14:58|Fatme Elzein|FoxESS|No|FALSE|TRUE|~#17858|05/11/2026 14:58|Casey Stamp|Other|No|FALSE|TRUE|~#14527|05/11/2026 14:57|Bratby Warwick|Enphase|No|FALSE|TRUE|`;
+
+        /* ---- Utility Parsers & Helpers ---- */
+        const MF = { ALPHAESS:'AlphaESS', SIGENERGY:'SigEnergy', GOODWE:'GoodWe', ENPHASE:'Enphase', SUNGROW:'Sungrow', FOXESS:'FoxESS', FOX:'FoxESS', SAJ:'SAJ', TESLA:'Tesla', FRONIUS:'Fronius', ISTORE:'iStore', SOLAREDGE:'SolarEdge', EMPOWER:'Empower', LG:'LG', EVEREADY:'Eveready', OTHER:'Other' };
+        const normM = m => { const k = String(m || '').toUpperCase().replace(/\s+/g, ''); return k ? (MF[k] || String(m).trim()) : ''; };
+        const pD = s => { const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/); return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : null; };
+        const yd = s => s ? new Date(2000 + +s.slice(0, 2), +s.slice(2, 4) - 1, +s.slice(4, 6)) : null;
+        const sod = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const dk = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        const fmtD = d => d ? d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+        const fmtS = d => d ? d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) : '—';
+        const fmtT = d => d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        const hasTime = d => d && (d.getHours() || d.getMinutes());
+        const ago = d => { if (!d) return '—'; const m = Math.round((Date.now() - d) / 6e4); if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago'; const x = Math.round(h / 24); return x + (x === 1 ? ' day ago' : ' days ago'); };
+        const bool = v => String(v || '').trim().toUpperCase() === 'TRUE';
+        const byUpd = (a, b) => ((b.updated || 0) - (a.updated || 0)) || (b.idx - a.idx);
+
+        function parseCSV(t) {
+            const rows = []; let row = [], f = '', q = false;
+            for (let i = 0; i < t.length; i++) {
+                const ch = t[i];
+                if (q) { if (ch === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch; }
+                else if (ch === '"') q = true;
+                else if (ch === ',') { row.push(f); f = ''; }
+                else if (ch === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+                else if (ch !== '\r') f += ch;
+            }
+            if (f || row.length) { row.push(f); rows.push(row); }
+            return rows;
+        }
+        const bodyRows = (rows, startsWith) => { const h = rows.findIndex(r => String(r[0] || '').trim().startsWith(startsWith)); return h >= 0 ? rows.slice(h + 1) : rows.slice(1); };
+
+        const mapOpen = (r, i) => ({ id: 'o' + i, ticket: (r[0] || '').trim(), name: (r[1] || '').trim().replace(/\.$/, ''), sys: (r[3] || '').trim(), logged: pD(r[4]), updated: pD(r[5]), fault: (r[6] || '').trim(), summary: (r[7] || '').trim(), mfr: normM(r[8]), serial: (r[9] || '').trim(), status: (r[10] || '').trim(), wl: (r[11] || '').trim(), wr: (r[12] || '').trim(), tech: (r[15] || '').trim(), techVisit: (r[16] || '').trim(), notes: (r[17] || '').trim(), closure: pD(r[18]) });
+        const liveOpen = rows => bodyRows(rows, 'Ticket').filter(r => (r[0] || '').trim() || (r[1] || '').trim()).map(mapOpen);
+        const liveCompleted = rows => bodyRows(rows, 'Ticket').filter(r => (r[0] || '').trim() || (r[1] || '').trim()).map((r, i) => ({ id: 'c' + i, ticket: (r[0] || '').trim(), name: (r[1] || '').trim().replace(/\.$/, ''), sys: (r[3] || '').trim(), logged: pD(r[4]), closed: pD(r[18]) || pD(r[5]), fault: (r[6] || '').trim(), summary: (r[7] || '').trim(), mfr: normM(r[8]), tech: (r[15] || '').trim(), notes: (r[17] || '').trim() }));
+        const mapCC = (p, i) => ({ id: 'k' + i, idx: i, ticket: (p[0] || '').trim(), updated: pD(p[1]), name: (p[2] || '').trim(), mfr: normM(p[3]), sldReq: (p[4] || '').trim().toLowerCase(), sldDone: bool(p[5]), cc: bool(p[6]), notes: (p[7] || '').trim() });
+        const liveCC = rows => bodyRows(rows, 'Servicem8').filter(r => (r[0] || '').trim() || (r[2] || '').trim()).map(mapCC);
+
+        const snapOpen = () => SNAP_OPEN.map((j, i) => mapOpen([j.t, j.n, '', j.sys, j.lg, j.up, j.f, j.sum, j.m, '', j.st, j.wl, j.wr, '', '', j.tech, j.tv, j.nt, ''], i));
+        const snapCompleted = () => SNAP_COMPLETED.split('~').map((l, i) => { const p = l.split('|'); return { id: 'c' + i, ticket: p[0] ? '#' + p[0] : '', name: p[1], closed: yd(p[2]), logged: yd(p[3]), fault: p[4] !== '' ? FL[+p[4]] : '', mfr: p[5] !== '' ? ML[+p[5]] : '', sys: p[6] !== '' ? SL[+p[6]] : '', summary: '', notes: '', tech: '' }; });
+        const snapCC = () => SNAP_CC.split('~').map((l, i) => mapCC(l.split('|'), i));
+
+        /* Job Status & Urgency Calculation Logic */
+        const STAGES = ['Reported', 'Investigating', 'Claim lodged', 'Tech booked', 'Closed'];
+        const isWarranty = j => /warranty|rma/i.test(j.status) || !!j.wl || !!j.wr;
+        const stageOf = j => { const s = (j.status || '').toLowerCase(); if (j.closure) return 4; if (s.includes('technician') || s.includes('booked') || j.techVisit) return 3; if (isWarranty(j)) return 2; if (s.includes('investigat')) return 1; return 0; };
+        const statusColor = s => { const v = (s || '').toLowerCase(); if (v.includes('investigat')) return C.blue; if (v.includes('technician') || v.includes('booked')) return C.teal; if (v.includes('warranty')) return C.acc; if (!v) return C.muted; return C.violet; };
+        const urgency = d => { if (!d) return { c: C.muted, l: 'No update date' }; const days = Math.floor((Date.now() - d) / DAY); if (days < 7) return { c: C.teal, l: 'Updated ' + ago(d), days }; if (days <= 14) return { c: C.acc, l: 'Updated ' + ago(d), days }; return { c: C.red, l: 'Updated ' + ago(d), days }; };
+        const CAT = { ready: { l: 'Ready to book', c: C.teal }, sld: { l: 'Needs SLD first', c: C.acc }, confirm: { l: 'Confirm SLD need', c: C.violet }, pending: { l: 'Audit pending', c: C.red } };
+        const catOf = r => !r.cc ? 'pending' : (r.sldReq === 'yes' && !r.sldDone) ? 'sld' : r.sldReq === '' ? 'confirm' : 'ready';
+        const verdict = r => { const k = catOf(r); if (k === 'ready') return 'Yes, book it. The audit is done and the SLD is ' + (r.sldReq === 'yes' ? 'done.' : 'not needed.'); if (k === 'sld') return 'Not yet. The audit is done but the SLD still needs to be drawn.'; if (k === 'confirm') return 'Not yet. "SLD Required?" is blank, so check whether this job needs an SLD first.'; return 'Not yet. The compliance audit is not finished' + (r.notes ? ' (' + r.notes + ').' : '.'); };
+        const makeInWin = win => { const start = sod(new Date()).getTime() - (win - 1) * DAY; return r => win === 0 ? true : !!(r.updated && r.updated.getTime() >= start); };
+
+        /* ---- Reusable UI Primitives (Plain React without Babel JSX) ---- */
+
+        function Dot({ c, s = 8 }) {
+            return e('span', { className: 'inline-block rounded-full flex-shrink-0', style: { width: s, height: s, background: c } });
+        }
+
+        function Tag({ c, children }) {
+            return e('span', { className: 'inline-flex items-center gap-2 text-xs whitespace-nowrap', style: { color: C.text } },
+                e(Dot, { c }),
+                children
+            );
+        }
+
+        function Seg({ opts, val, set }) {
+            return e('div', { className: 'inline-flex flex-wrap rounded-full overflow-hidden', style: { border: '1px solid ' + C.line, background: C.panel } },
+                opts.map((o, i) => e('button', {
+                    key: String(o.v),
+                    onClick: () => set(o.v),
+                    className: 'seg px-3.5 py-1.5 text-xs font-medium',
+                    style: {
+                    background: val === o.v ? C.acc : 'transparent',
+                    color: val === o.v ? C.dark : C.muted,
+                    borderLeft: i ? '1px solid ' + C.line : 'none'
+                    }
+                }, o.l))
+            );
+        }
+
+        function Kpis({ items, cols }) {
+            return e('div', { className: 'grid grid-cols-2 sm:grid-cols-3 gap-px rounded-lg overflow-hidden ' + (cols || 'lg:grid-cols-5'), style: { background: C.line, border: '1px solid ' + C.line } },
+                items.map(it => e('div', { key: it.l, className: 'p-4', style: { background: C.panel } },
+                    e('div', { className: 'lbl' }, it.l),
+                    e('div', { className: 'text-3xl font-semibold tabular-nums mt-2', style: { color: it.c || C.text } }, it.v),
+                    it.n ? e('div', { className: 'text-xs mt-1', style: { color: C.muted } }, it.n) : null
+                ))
+            );
+        }
+
+        function Panel({ title, hint, right, children, className }) {
+            return e('section', { className: 'p-4 sm:p-5 rounded-lg ' + (className || ''), style: { background: C.panel, border: '1px solid ' + C.line } },
+                (title || right) ? e('div', { className: 'flex flex-wrap items-start justify-between gap-3 mb-4' },
+                    e('div', null,
+                    e('h3', { className: 'text-base font-semibold', style: { color: C.text } }, title),
+                    hint ? e('p', { className: 'text-xs mt-1 max-w-2xl', style: { color: C.muted } }, hint) : null
+                    ),
+                    right
+                ) : null,
+                children
+            );
+        }
+
+        function Table({ cols, rows, onRow, empty, minW = 680 }) {
+            return e('div', { className: 'overflow-x-auto' },
+                e('table', { className: 'w-full text-left', style: { minWidth: minW, borderCollapse: 'collapse' } },
+                    e('thead', null,
+                    e('tr', null,
+                    cols.map(c => e('th', { key: c.k, className: 'lbl py-2 px-3', style: { borderBottom: '1px solid ' + C.line, fontSize: '10px' } }, c.l))
+                    )
+                    ),
+                    e('tbody', null,
+                    rows.length ? rows.map((r, i) =>
+                    e('tr', {
+                    key: r.id || i,
+                    tabIndex: 0,
+                    className: 'trow',
+                    onClick: () => onRow && onRow(r),
+                    onKeyDown: ev => { if (ev.key === 'Enter' && onRow) onRow(r); }
+                    },
+                    cols.map(c => e('td', { key: c.k, className: 'py-2.5 px-3 text-sm', style: { color: C.text } },
+                    c.r ? c.r(r) : (r[c.k] || '—')
+                    ))
+                    )
+                    ) : e('tr', null,
+                    e('td', { colSpan: cols.length, className: 'py-10 text-center text-sm', style: { color: C.muted } }, empty)
+                    )
+                    )
+                )
+            );
+        }
+
+        /* Editorial page heading: grotesk title + Fraunces italic accent */
+        function Head({ kicker, t, it, sub, right }) {
+            return e('div', { className: 'flex flex-wrap items-end justify-between gap-3' },
+                e('div', { className: 'min-w-0' },
+                    e('div', { className: 'lbl' }, kicker),
+                    e('h1', { className: 'text-2xl sm:text-3xl font-semibold tracking-tight mt-1.5', style: { color: C.text, textWrap: 'balance' } },
+                        t, ' ', e('span', { className: 'it', style: { color: C.acc } }, it)
+                    ),
+                    sub ? e('p', { className: 'text-sm mt-2 max-w-xl', style: { color: C.muted, textWrap: 'pretty' } }, sub) : null
+                ),
+                right
+            );
+        }
+
+        const tipStyle = { contentStyle: { background: C.panel, border: '1px solid ' + C.line, borderRadius: 8, color: C.text, fontSize: 12 }, labelStyle: { color: C.text }, itemStyle: { color: C.text }, cursor: { fill: 'rgba(234,240,242,0.04)' } };
+        const axisStyle = { stroke: C.muted, fontSize: 11, tickLine: false, axisLine: { stroke: C.line } };
+
+        const ICONS = {
+            refresh: 'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
+            external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
+            copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+            download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+            warn: 'M12 3 2 21h20L12 3zM12 10v5M12 18h.01'
+        };
+
+        function Icon({ n, spin, className }) {
+            return e('svg', {
+                viewBox: '0 0 24 24',
+                width: 13,
+                height: 13,
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 2,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+                className: (className || '') + (spin ? ' animate-spin' : ''),
+                style: { display: 'inline-block', verticalAlign: '-2px' },
+                'aria-hidden': true
+            }, e('path', { d: ICONS[n] }));
+        }
+
+        function Logo() {
+            return e('div', { className: 'flex items-center' },
+                e('img', {
+                    src: 'https://cdn.abacus.ai/images/ec6e4715-6e09-42d6-b056-5d7b5cd8c968.png',
+                    alt: 'Platinum Solar Group',
+                    className: 'h-12 sm:h-14 w-auto block',
+                    style: { marginLeft: -10 }
+                })
+            );
+        }
+
+        /* ---- Tab 1: Tech Support ---- */
+        function TechTab({ open, completed, onOpen }) {
+            const now = new Date(), y = now.getFullYear(), today = sod(now);
+            const [q, setQ] = useState('');
+            const [per, setPer] = useState('day');
+            const PER = { day: 'Today', week: 'This week', month: 'This month', year: 'This year' };
+
+            const start = useMemo(() => {
+                const s = new Date(today);
+                if (per === 'week') { const wd = (s.getDay() + 6) % 7; s.setDate(s.getDate() - wd); }
+                else if (per === 'month') s.setDate(1);
+                else if (per === 'year') { s.setMonth(0); s.setDate(1); }
+                return s;
+            }, [per, today]);
+
+            const st = useMemo(() => ({
+                closedIn: completed.filter(c => c.closed && c.closed >= start).length,
+                openedIn: [...open, ...completed].filter(j => j.logged && j.logged >= start).length,
+                updIn: open.filter(j => j.updated && j.updated >= start).length,
+                stale: open.filter(j => j.updated && (today - sod(j.updated)) / DAY > 14).length
+            }), [open, completed, start, today]);
+
+            const monthly = useMemo(() => MONTHS.slice(0, now.getMonth() + 1).map((m, i) => ({
+                m, Opened: [...open, ...completed].filter(j => j.logged && j.logged.getFullYear() === y && j.logged.getMonth() === i).length,
+                Completed: completed.filter(c => c.closed && c.closed.getFullYear() === y && c.closed.getMonth() === i).length
+            })), [open, completed]);
+
+            const statusData = useMemo(() => {
+                const m = {}; open.forEach(j => { const k = j.status || 'No status yet'; m[k] = (m[k] || 0) + 1; });
+                return Object.entries(m).map(([name, v]) => ({ name, v })).sort((a, b) => b.v - a.v);
+            }, [open]);
+
+            const rows = useMemo(() => {
+                const s = q.trim().toLowerCase();
+                let list = [...open].sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                if (s) list = list.filter(j => [j.ticket, j.name, j.fault, j.mfr, j.status, j.summary, j.notes, j.sys].join(' ').toLowerCase().includes(s));
+                return list;
+            }, [open, q]);
+
+            const cols = [
+                { k: 'ticket', l: 'Ticket', r: j => e('span', { style: { color: C.acc } }, j.ticket || '—') },
+                { k: 'name', l: 'Customer' },
+                { k: 'status', l: 'Status', r: j => e(Tag, { c: statusColor(j.status) }, j.status || 'No status yet') },
+                { k: 'fault', l: 'Fault', r: j => e('span', { className: 'block truncate', style: { maxWidth: 150 } }, j.fault || '—') },
+                { k: 'updated', l: 'Updated', r: j => { const u = urgency(j.updated); return e('span', { className: 'inline-flex items-center gap-2 whitespace-nowrap' }, e(Dot, { c: u.c }), e('span', null, ago(j.updated))); } },
+                { k: 'notes', l: 'Latest note', r: j => j.notes ? e('span', { title: j.notes, className: 'block truncate', style: { maxWidth: 320 } }, j.notes) : e('span', { style: { color: C.muted } }, '—') }
+            ];
+
+            return e('div', { className: 'space-y-5' },
+                e(Head, {
+                    kicker: '01 · Tech support',
+                    t: 'Ongoing issues,',
+                    it: 'tracked in the open.',
+                    sub: 'End-of-period report for the day, week, month or year: what was closed, what was opened, and every ongoing issue with its latest note. Click a job for the full story.',
+                    right: e('div', { className: 'flex items-center gap-2' },
+                        e('span', { className: 'lbl' }, 'Report'),
+                        e(Seg, { opts: [{ v: 'day', l: 'Today' }, { v: 'week', l: 'This week' }, { v: 'month', l: 'This month' }, { v: 'year', l: 'This year' }], val: per, set: setPer })
+                    )
+                }),
+                e(Kpis, {
+                    items: [
+                    { l: PER[per] + ' · closed', v: st.closedIn, c: C.teal, n: 'since ' + fmtS(start) },
+                    { l: PER[per] + ' · opened', v: st.openedIn, c: C.blue, n: 'new issues logged' },
+                    { l: PER[per] + ' · updates', v: st.updIn, c: C.violet, n: 'open jobs updated' },
+                    { l: 'Ongoing now', v: open.length, c: C.acc, n: 'open across all time' },
+                    { l: 'No update 14+ days', v: st.stale, c: C.red, n: 'waiting on a note' }
+                    ]
+                }),
+                e('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-5' },
+                    e('div', { className: 'lg:col-span-2 space-y-5' },
+                        e(Panel, {
+                            title: 'Ongoing issues',
+                            hint: 'Open jobs, most recently updated first. Dot colour: green under 7 days, amber 7-14, red over 14. Click a job for full notes.',
+                            right: e('div', { className: 'flex items-center gap-2' },
+                                e('input', {
+                                    value: q,
+                                    onChange: ev => setQ(ev.target.value),
+                                    placeholder: 'Search ticket, customer, fault, note',
+                                    className: 'px-3.5 py-1.5 text-sm',
+                                    style: { background: C.bg, border: '1px solid ' + C.line, color: C.text, borderRadius: 9999, minWidth: 220 }
+                                }),
+                                e('span', { className: 'text-xs tabular-nums whitespace-nowrap', style: { color: C.muted } }, rows.length + ' open')
+                            )
+                        },
+                            e(Table, { cols, rows, minW: 780, onRow: j => onOpen({ type: 'open', rec: j }), empty: 'No open jobs match this search.' })
+                        ),
+                        e(Panel, { title: 'Jobs opened vs completed per month, ' + y, hint: 'Opened uses Date Logged from both tabs. Completed uses Customer Closure Date.' },
+                            e('div', { style: { height: 240 } },
+                                e(ResponsiveContainer, null,
+                                    e(BarChart, { data: monthly, margin: { left: -16, right: 8, top: 8 } },
+                                    e(CartesianGrid, { stroke: C.line, vertical: false }),
+                                    e(XAxis, Object.assign({ dataKey: 'm' }, axisStyle)),
+                                    e(YAxis, Object.assign({ allowDecimals: false }, axisStyle)),
+                                    e(Tooltip, tipStyle),
+                                    e(Legend, { wrapperStyle: { fontSize: 12, color: C.muted } }),
+                                    e(Bar, { dataKey: 'Opened', fill: C.acc, className: 'bar-acc', radius: [2, 2, 0, 0], barSize: 14, animationDuration: 900 }),
+                                    e(Bar, { dataKey: 'Completed', fill: C.teal, className: 'bar-teal', radius: [2, 2, 0, 0], barSize: 14, animationDuration: 900 })
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    e(Panel, { title: 'Open jobs by status', hint: 'Click a job in the list for full details.' },
+                        e('div', { className: 'divide-y', style: { borderColor: C.line } },
+                            statusData.map(s => e('div', { key: s.name, className: 'py-2.5', style: { borderColor: C.line } },
+                                e('div', { className: 'flex justify-between text-sm' },
+                                    e(Tag, { c: statusColor(s.name === 'No status yet' ? '' : s.name) }, s.name),
+                                    e('span', { className: 'tabular-nums' }, s.v)
+                                ),
+                                e('div', { className: 'h-1.5 mt-2', style: { background: 'rgba(234,240,242,0.08)' } },
+                                    e('div', {
+                                        className: 'h-full',
+                                        style: {
+                                            width: (s.v / Math.max(open.length, 1) * 100) + '%',
+                                            background: statusColor(s.name === 'No status yet' ? '' : s.name),
+                                            transition: 'width .8s'
+                                        }
+                                    })
+                                )
+                            ))
+                        )
+                    )
+                )
+            );
+        }
+
+        /* ---- Tab 2: Compliance ---- */
+        function ComplianceTab({ rows, win, setWin, onOpen, searchRef, toast }) {
+            const today = sod(new Date());
+            const [day, setDay] = useState(dk(today));
+            const [cat, setCat] = useState('ready');
+            const [q, setQ] = useState('');
+            const inWin = makeInWin(win);
+
+            const lists = useMemo(() => {
+                const w = rows.map(r => ({ ...r, cat: catOf(r) }));
+                return {
+                    ready: w.filter(r => r.cat === 'ready' && inWin(r)).sort(byUpd),
+                    sld: w.filter(r => r.cat === 'sld').sort(byUpd),
+                    confirm: w.filter(r => r.cat === 'confirm').sort(byUpd),
+                    pending: w.filter(r => r.cat === 'pending').sort(byUpd),
+                    hidden: w.filter(r => r.cat === 'ready' && !inWin(r)).length
+                };
+            }, [rows, win]);
+
+            const days = useMemo(() => Array.from({ length: 14 }, (_, i) => {
+                const d = new Date(today.getTime() - (13 - i) * DAY);
+                const k = dk(d);
+                const rs = rows.filter(r => r.updated && dk(r.updated) === k);
+                return { key: k, d: d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' }), Audits: rs.filter(r => r.cc).length, SLDs: rs.filter(r => r.sldDone).length };
+            }), [rows]);
+
+            const dayRows = rows.filter(r => r.updated && dk(r.updated) === day).sort(byUpd);
+            const todayRows = rows.filter(r => r.updated && dk(r.updated) === dk(today));
+            const s = q.trim().toLowerCase();
+            const shown = lists[cat].filter(r => !s || [r.ticket, r.name, r.mfr, r.notes].join(' ').toLowerCase().includes(s));
+            const winLabel = win === 0 ? 'all time' : 'last ' + win + ' days';
+
+            const copy = () => {
+                const txt = shown.map(r => [r.ticket || 'No ticket', r.name, r.mfr || '-', r.updated ? fmtD(r.updated) : 'before tracking'].join(' | ')).join('\n');
+                (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+                    .then(() => toast('Copied ' + shown.length + ' jobs'))
+                    .catch(() => toast('Copy restricted in browser environment'));
+            };
+
+            const csv = () => {
+                const esc = v => '"' + String(v || '').replace(/"/g, '""') + '"';
+                const body = [['Ticket', 'Customer', 'Manufacturer', 'Status', 'SLD required', 'SLD done', 'Audit done', 'Last updated', 'Notes'], ...shown.map(r => [r.ticket, r.name, r.mfr, CAT[r.cat].l, r.sldReq || 'blank', r.sldDone ? 'Yes' : 'No', r.cc ? 'Yes' : 'No', r.updated ? fmtD(r.updated) + ' ' + fmtT(r.updated) : '', r.notes])].map(r => r.map(esc).join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
+                a.download = 'psg-' + cat + '-' + dk(today) + '.csv';
+                a.click();
+                toast('Downloaded ' + shown.length + ' rows');
+            };
+
+            return e('div', { className: 'space-y-5' },
+                e(Head, {
+                    kicker: '02 · Compliance & booking',
+                    t: 'Audited, checked,',
+                    it: 'ready to book.',
+                    sub: 'Audits are read from the Last Updated column. "Ready to book" only shows jobs updated in the active window.',
+                    right: e('div', { className: 'flex items-center gap-2' },
+                        e('span', { className: 'lbl' }, 'Window'),
+                        e(Seg, { opts: [{ v: 7, l: '7 days' }, { v: 14, l: '14 days' }, { v: 30, l: '30 days' }, { v: 0, l: 'All time' }], val: win, set: setWin })
+                    )
+                }),
+                e(Kpis, {
+                    items: [
+                    { l: 'Audited today', v: todayRows.filter(r => r.cc).length, c: C.acc, n: fmtS(today) },
+                    { l: 'SLDs done today', v: todayRows.filter(r => r.sldDone).length },
+                    { l: 'Ready to book', v: lists.ready.length, c: C.teal, n: winLabel },
+                    { l: 'Needs SLD / confirm', v: lists.sld.length + lists.confirm.length, c: C.acc },
+                    { l: 'Audit pending', v: lists.pending.length, c: C.red }
+                    ]
+                }),
+                e('div', { className: 'grid grid-cols-1 lg:grid-cols-5 gap-5' },
+                    e(Panel, { className: 'lg:col-span-2', title: 'Daily report', hint: 'Click a bar to view daily updates.' },
+                    e('div', { style: { height: 180 } },
+                    e(ResponsiveContainer, null,
+                    e(BarChart, { data: days, margin: { left: -24, right: 4, top: 6 }, onClick: ev => ev && ev.activePayload && setDay(ev.activePayload[0].payload.key) },
+                    e(XAxis, Object.assign({ dataKey: 'd', interval: 1 }, axisStyle)),
+                    e(YAxis, Object.assign({ allowDecimals: false }, axisStyle)),
+                    e(Tooltip, tipStyle),
+                    e(Bar, { dataKey: 'Audits', className: 'bar-acc', barSize: 10, radius: [2, 2, 0, 0], style: { cursor: 'pointer' } },
+                    days.map(d => e(Cell, { key: d.key, fill: d.key === day ? C.acc : 'rgba(242,169,0,0.45)' }))
+                    ),
+                    e(Bar, { dataKey: 'SLDs', fill: C.teal, className: 'bar-teal', barSize: 10, radius: [2, 2, 0, 0] })
+                    )
+                    )
+                    ),
+                    e('div', { className: 'flex items-baseline justify-between mt-4 mb-1', style: { borderTop: '1px solid ' + C.line, paddingTop: 12 } },
+                    e('span', { className: 'text-sm font-semibold' }, fmtS(new Date(day + 'T00:00'))),
+                    e('span', { className: 'text-xs', style: { color: C.muted } }, dayRows.filter(r => r.cc).length + ' audits · ' + dayRows.filter(r => r.sldDone).length + ' SLDs')
+                    ),
+                    e('div', { className: 'divide-y', style: { maxHeight: 260, overflowY: 'auto' } },
+                    dayRows.length ? dayRows.map(r =>
+                    e('button', { key: r.id, onClick: () => onOpen({ type: 'compliance', rec: r }), className: 'w-full text-left py-2.5 flex items-center gap-3 trow', style: { borderColor: C.line } },
+                    e('span', { className: 'text-xs tabular-nums w-16 flex-shrink-0', style: { color: C.muted } }, fmtT(r.updated)),
+                    e('span', { className: 'flex-1 min-w-0' },
+                    e('span', { className: 'text-sm block truncate' }, r.name),
+                    e('span', { className: 'text-xs', style: { color: C.muted } }, (r.ticket || 'No ticket') + ' · ' + (r.mfr || 'No manufacturer'))
+                    ),
+                    e(Tag, { c: CAT[catOf(r)].c }, CAT[catOf(r)].l)
+                    )
+                    ) : e('p', { className: 'py-6 text-sm text-center', style: { color: C.muted } }, 'Nothing updated on this day.')
+                    )
+                    ),
+                    e(Panel, {
+                    className: 'lg:col-span-3',
+                    title: 'Booking queue',
+                    hint: 'For booking installs. Click a job to inspect status.',
+                    right: e('div', { className: 'flex gap-2' },
+                    e('button', { onClick: copy, className: 'btng text-xs px-3.5 py-1.5 rounded-full', style: { border: '1px solid ' + C.line, color: C.text } }, e(Icon, { n: 'copy', className: 'mr-1.5' }), 'Copy list'),
+                    e('button', { onClick: csv, className: 'btnp text-xs px-3.5 py-1.5 rounded-full font-semibold', style: { background: C.acc, color: C.dark } }, e(Icon, { n: 'download', className: 'mr-1.5' }), 'CSV')
+                    )
+                    },
+                    e('div', { className: 'flex flex-wrap gap-2 mb-3 items-center' },
+                    e(Seg, { opts: Object.keys(CAT).map(k => ({ v: k, l: CAT[k].l + ' (' + lists[k].length + ')' })), val: cat, set: setCat }),
+                    e('input', {
+                    ref: searchRef,
+                    value: q,
+                    onChange: ev => setQ(ev.target.value),
+                    placeholder: 'Search ( / )',
+                    className: 'px-3.5 py-1.5 text-sm flex-1',
+                    style: { background: C.bg, border: '1px solid ' + C.line, color: C.text, borderRadius: 9999, minWidth: 160 }
+                    })
+                    ),
+                    e(Table, {
+                    minW: 560,
+                    rows: shown,
+                    onRow: r => onOpen({ type: 'compliance', rec: r }),
+                    empty: cat === 'ready' ? 'No jobs audited and ready to book in the ' + winLabel + '.' : 'Nothing here right now.',
+                    cols: [
+                    { k: 'ticket', l: 'Ticket', r: r => e('span', { style: { color: C.acc } }, r.ticket || '—') },
+                    { k: 'name', l: 'Customer' },
+                    { k: 'mfr', l: 'Manufacturer' },
+                    { k: 'sld', l: 'SLD', r: r => r.sldReq === 'yes' ? (r.sldDone ? 'Done' : 'Needed') : r.sldReq === 'no' ? e('span', { style: { color: C.muted } }, 'Not needed') : e('span', { style: { color: C.muted } }, 'Blank') },
+                    { k: 'updated', l: 'Audited', r: r => r.updated ? e('span', { className: 'tabular-nums' }, fmtS(r.updated) + (hasTime(r.updated) ? ', ' + fmtT(r.updated) : '')) : e('span', { style: { color: C.muted } }, 'Before tracking') }
+                    ]
+                    }),
+                    cat === 'ready' && lists.hidden > 0 ? e('p', { className: 'text-xs mt-3', style: { color: C.muted } }, lists.hidden + ' older ready jobs are hidden because they fall outside the ' + winLabel + '. Choose "All time" to see them.') : null
+                    )
+                )
+            );
+        }
+
+        /* ---- Tab 3: SLD Tracker ---- */
+        function SldTab({ rows, win, setWin, onOpen }) {
+            const inWin = makeInWin(win);
+            const done = rows.filter(r => r.sldDone && inWin(r)).sort(byUpd);
+            const hidden = rows.filter(r => r.sldDone && !inWin(r)).length;
+            const todo = rows.filter(r => r.sldReq === 'yes' && !r.sldDone).sort(byUpd);
+            const blank = rows.filter(r => r.sldReq === '').sort(byUpd);
+            const winLabel = win === 0 ? 'all time' : 'last ' + win + ' days';
+
+            const cols = [
+                { k: 'ticket', l: 'Ticket', r: r => e('span', { style: { color: C.acc } }, r.ticket || '—') },
+                { k: 'name', l: 'Customer' }, { k: 'mfr', l: 'Manufacturer' },
+                { k: 'cc', l: 'Audit', r: r => r.cc ? e(Tag, { c: C.teal }, 'Done') : e(Tag, { c: C.red }, 'Pending') },
+                { k: 'updated', l: 'Last updated', r: r => r.updated ? e('span', { className: 'tabular-nums' }, fmtS(r.updated)) : e('span', { style: { color: C.muted } }, 'Before tracking') }
+            ];
+
+            return e('div', { className: 'space-y-5' },
+                e(Head, {
+                    kicker: '03 · SLD tracker',
+                    t: 'Single-line diagrams,',
+                    it: 'drawn or due.',
+                    sub: '"SLDs done" only counts jobs updated in the window. Outstanding SLDs remain visible.',
+                    right: e('div', { className: 'flex items-center gap-2' },
+                        e('span', { className: 'lbl' }, 'Window'),
+                        e(Seg, { opts: [{ v: 7, l: '7 days' }, { v: 14, l: '14 days' }, { v: 30, l: '30 days' }, { v: 0, l: 'All time' }], val: win, set: setWin })
+                    )
+                }),
+                e(Kpis, {
+                    cols: 'lg:grid-cols-3',
+                    items: [
+                    { l: 'SLDs done, ' + winLabel, v: done.length, c: C.teal },
+                    { l: 'SLDs to draw', v: todo.length, c: C.acc, n: 'SLD Required = Yes, not done' },
+                    { l: 'SLD need unclear', v: blank.length, c: C.violet, n: '"SLD Required?" is blank' }
+                    ]
+                }),
+                e(Panel, { title: 'SLDs to draw', hint: 'Required but not done yet. These block booking.' },
+                    e(Table, { minW: 560, cols, rows: todo, onRow: r => onOpen({ type: 'compliance', rec: r }), empty: 'No SLDs outstanding.' })
+                ),
+                e('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-5' },
+                    e(Panel, { title: 'SLDs done, ' + winLabel },
+                    e(Table, { minW: 480, cols, rows: done, onRow: r => onOpen({ type: 'compliance', rec: r }), empty: 'No SLDs marked done in the ' + winLabel + '.' }),
+                    hidden > 0 ? e('p', { className: 'text-xs mt-3', style: { color: C.muted } }, hidden + ' older SLDs hidden. Choose "All time" to see them.') : null
+                    ),
+                    e(Panel, { title: 'Confirm if an SLD is needed' },
+                    e(Table, { minW: 480, cols, rows: blank, onRow: r => onOpen({ type: 'compliance', rec: r }), empty: 'Every row has an answer.' })
+                    )
+                )
+            );
+        }
+
+        /* ---- Tab 4: RMA Timeline (Warranty / RMA only) ---- */
+        function Stepper({ stage }) {
+            return e('div', { className: 'flex items-center w-full' },
+                STAGES.map((s, i) => e(React.Fragment, { key: s },
+                    e('div', { className: 'flex flex-col items-center', style: { minWidth: 14 }, title: s },
+                    e('span', {
+                    className: 'rounded-full',
+                    style: {
+                    width: i === stage ? 14 : 10,
+                    height: i === stage ? 14 : 10,
+                    background: i <= stage ? C.acc : 'transparent',
+                    border: '2px solid ' + (i <= stage ? C.acc : 'rgba(147,169,178,.4)')
+                    }
+                    })
+                    ),
+                    i < STAGES.length - 1 ? e('div', { className: 'flex-1 h-0.5', style: { background: i < stage ? C.acc : 'rgba(147,169,178,.25)' } }) : null
+                ))
+            );
+        }
+
+        function RmaTab({ open, onOpen }) {
+            const [stage, setStage] = useState(null);
+            const jobs = open.filter(isWarranty).map(j => ({ ...j, stage: stageOf(j), age: j.updated ? Math.floor((Date.now() - j.updated) / DAY) : -1 }));
+            const list = jobs.filter(j => stage === null || j.stage === stage).sort((a, b) => b.age - a.age);
+
+            return e('div', { className: 'space-y-5' },
+                e(Head, {
+                    kicker: '04 · RMA timeline',
+                    t: 'Warranty & RMA,',
+                    it: 'parts in motion.',
+                    sub: 'Only warranty / RMA jobs are shown. They progress left-to-right through 5 stages — click any step to filter.',
+                    right: e('span', { className: 'lbl' }, jobs.length + ' warranty / RMA jobs')
+                }),
+                e('div', { className: 'grid grid-cols-2 sm:grid-cols-5 gap-px rounded-lg overflow-hidden', style: { background: C.line, border: '1px solid ' + C.line } },
+                    STAGES.map((s, i) => e('button', {
+                    key: s,
+                    onClick: () => setStage(stage === i ? null : i),
+                    className: 'p-4 text-left',
+                    style: { background: stage === i ? C.panel2 : C.panel, borderTop: '2px solid ' + (stage === i ? C.acc : 'transparent') }
+                    },
+                    e('div', { className: 'lbl' }, 'Step ' + (i + 1)),
+                    e('div', { className: 'text-sm font-semibold mt-1' }, s),
+                    e('div', { className: 'text-2xl font-semibold tabular-nums mt-1', style: { color: stage === i ? C.acc : C.text } }, jobs.filter(j => j.stage === i).length)
+                    ))
+                ),
+                e('div', { className: 'flex flex-wrap gap-4 text-xs', style: { color: C.muted } },
+                    e(Tag, { c: C.teal }, 'Updated < 7 days ago'),
+                    e(Tag, { c: C.acc }, '7 to 14 days'),
+                    e(Tag, { c: C.red }, 'Over 14 days')
+                ),
+                e('div', { className: 'rounded-lg overflow-hidden', style: { background: C.panel, border: '1px solid ' + C.line } },
+                    list.length ? list.map(j => {
+                    const u = urgency(j.updated);
+                    return e('button', {
+                    key: j.id,
+                    onClick: () => onOpen({ type: 'open', rec: j }),
+                    className: 'trow w-full text-left grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-5 p-4 items-center'
+                    },
+                    e('div', { className: 'md:col-span-3 min-w-0' },
+                    e('div', { className: 'flex items-center gap-2' }, e(Dot, { c: u.c, s: 9 }), e('span', { className: 'font-semibold truncate' }, j.name)),
+                    e('div', { className: 'text-xs mt-1', style: { color: C.muted } }, j.ticket + ' · ' + (j.mfr || 'No mfr') + ' · ' + (j.fault || 'No fault'))
+                    ),
+                    e('div', { className: 'md:col-span-4' },
+                    e(Stepper, { stage: j.stage }),
+                    e('div', { className: 'text-xs mt-2 flex justify-between' },
+                    e('span', { style: { color: C.acc } }, STAGES[j.stage]),
+                    e('span', { style: { color: C.muted } }, j.status || 'No status yet')
+                    )
+                    ),
+                    e('div', { className: 'md:col-span-5 min-w-0' },
+                    e('div', { className: 'text-xs', style: { color: u.c } }, u.l + (j.updated ? ' · ' + fmtD(j.updated) : '')),
+                    e('div', { className: 'text-sm mt-1 truncate', style: { color: C.text } }, j.notes || j.summary || 'No notes yet')
+                    )
+                    );
+                    }) : e('p', { className: 'p-10 text-center text-sm', style: { color: C.muted } }, 'No warranty / RMA jobs at this step.')
+                )
+            );
+        }
+
+        /* ---- Tab 5: Heat Map ---- */
+        function heatColor(v, max) {
+            if (!v) return 'rgba(147,169,178,0.10)';
+            const r = v / Math.max(max, 1);
+            return 'rgba(242,169,0,' + (r > 0.75 ? 1 : r > 0.5 ? 0.75 : r > 0.25 ? 0.5 : 0.28) + ')';
+        }
+
+        function HeatTab({ completed, compliance, onOpen }) {
+            const nowY = new Date().getFullYear();
+            const [src, setSrc] = useState('completed');
+            const [layout, setLayout] = useState('calendar');
+            const [group, setGroup] = useState('mfr');
+            const [year, setYear] = useState(nowY);
+            const [sel, setSel] = useState(null);
+
+            useEffect(() => { setGroup('mfr'); setSel(null); }, [src]);
+
+            const recs = useMemo(() => src === 'completed' ? completed.filter(r => r.closed).map(r => ({ ...r, _d: r.closed })) : compliance.filter(r => r.updated).map(r => ({ ...r, _d: r.updated })), [src, completed, compliance]);
+            const years = [...new Set([nowY, ...recs.map(r => r._d.getFullYear())])].sort((a, b) => b - a);
+            const yr = recs.filter(r => r._d.getFullYear() === year);
+
+            const byDay = useMemo(() => {
+                const m = {}; yr.forEach(r => { const k = dk(r._d); (m[k] = m[k] || []).push(r); }); return m;
+            }, [yr]);
+
+            const maxDay = Math.max(1, ...Object.values(byDay).map(a => a.length));
+            const gkey = r => group === 'fault' ? (r.fault || 'Not set') : group === 'sys' ? (r.sys || 'Not set') : group === 'result' ? CAT[catOf(r)].l : (r.mfr || 'Not set');
+
+            const matrix = useMemo(() => {
+                const m = {}; yr.forEach(r => { const g = gkey(r); m[g] = m[g] || { name: g, total: 0, months: Array.from({ length: 12 }, () => []) }; m[g].total++; m[g].months[r._d.getMonth()].push(r); });
+                let rows = Object.values(m).sort((a, b) => b.total - a.total);
+                if (rows.length > 12) {
+                    const rest = rows.slice(11);
+                    const o = { name: 'Other (' + rest.length + ')', total: 0, months: Array.from({ length: 12 }, () => []) };
+                    rest.forEach(r => { o.total += r.total; r.months.forEach((a, i) => o.months[i].push(...a)); });
+                    rows = [...rows.slice(0, 11), o];
+                }
+                return rows;
+            }, [yr, group]);
+
+            const maxCell = Math.max(1, ...matrix.flatMap(r => r.months.map(a => a.length)));
+            const monthly = MONTHS.map((m, i) => ({ m, v: yr.filter(r => r._d.getMonth() === i).length }));
+            const busiestDay = Object.entries(byDay).sort((a, b) => b[1].length - a[1].length)[0];
+            const busiestMonth = [...monthly].sort((a, b) => b.v - a.v)[0];
+
+            const jan1 = new Date(year, 0, 1);
+            const offset = (jan1.getDay() + 6) % 7;
+            const nDays = Math.round((new Date(year + 1, 0, 1) - jan1) / DAY);
+            const cells = Array.from({ length: offset + nDays }, (_, i) => i < offset ? null : new Date(year, 0, 1 + i - offset));
+            const CELL = 11, GAP = 2;
+            const word = src === 'completed' ? 'completed jobs' : 'compliance updates';
+            const groupOpts = src === 'completed' ? [{ v: 'mfr', l: 'Manufacturer' }, { v: 'fault', l: 'Fault type' }, { v: 'sys', l: 'System type' }] : [{ v: 'mfr', l: 'Manufacturer' }, { v: 'result', l: 'Booking status' }];
+
+            return e('div', { className: 'space-y-5' },
+                e(Head, {
+                    kicker: '05 · Heat map',
+                    t: 'Where the work',
+                    it: 'lands in the year.'
+                }),
+                e('div', { className: 'flex flex-wrap gap-3 items-center' },
+                    e(Seg, { opts: [{ v: 'completed', l: 'Tech support: completed jobs' }, { v: 'compliance', l: 'Compliance checks' }], val: src, set: setSrc }),
+                    e(Seg, { opts: years.map(y => ({ v: y, l: String(y) })), val: year, set: v => { setYear(v); setSel(null); } }),
+                    e(Seg, { opts: [{ v: 'calendar', l: 'Calendar' }, { v: 'matrix', l: 'Month grid' }], val: layout, set: v => { setLayout(v); setSel(null); } }),
+                    layout === 'matrix' ? e(Seg, { opts: groupOpts, val: group, set: v => { setGroup(v); setSel(null); } }) : null
+                ),
+                e('p', { className: 'text-sm', style: { color: C.muted } }, src === 'completed' ? 'Each square is a day, coloured by closed jobs count. Click a cell for details.' : 'Each square represents compliance updates per day. Click a cell for details.'),
+                e(Kpis, {
+                    cols: 'lg:grid-cols-3',
+                    items: [
+                    { l: 'Total ' + word + ', ' + year, v: yr.length, c: C.acc },
+                    { l: 'Busiest day', v: busiestDay ? busiestDay[1].length : 0, n: busiestDay ? fmtS(new Date(busiestDay[0] + 'T00:00')) : 'No data' },
+                    { l: 'Busiest month', v: busiestMonth && busiestMonth.v ? busiestMonth.v : 0, n: busiestMonth && busiestMonth.v ? busiestMonth.m + ' ' + year : 'No data' }
+                    ]
+                }),
+                e(Panel, {
+                    title: layout === 'calendar' ? 'Daily heat map, ' + year : 'Month grid, ' + year,
+                    right: e('div', { className: 'flex items-center gap-1 text-xs', style: { color: C.muted } }, 'Less ', [0, 0.2, 0.4, 0.7, 1].map(v => e('span', { key: v, style: { width: 11, height: 11, background: heatColor(v * maxDay, maxDay), display: 'inline-block' } })), ' More')
+                },
+                    layout === 'calendar' ? e('div', { className: 'overflow-x-auto pb-2' },
+                    e('div', { className: 'relative', style: { height: 14, width: Math.ceil(cells.length / 7) * (CELL + GAP) + 28 } },
+                    MONTHS.map((m, i) => {
+                    const doy = Math.round((new Date(year, i, 1) - jan1) / DAY);
+                    return e('span', { key: m, className: 'absolute text-xs', style: { left: 28 + Math.floor((offset + doy) / 7) * (CELL + GAP), color: C.muted, fontSize: 10 } }, m);
+                    })
+                    ),
+                    e('div', { className: 'flex' },
+                    e('div', { className: 'flex flex-col text-xs mr-1', style: { width: 24, gap: GAP, color: C.muted, fontSize: 9 } },
+                    ['Mon', '', 'Wed', '', 'Fri', '', ''].map((d, i) => e('span', { key: i, style: { height: CELL, lineHeight: CELL + 'px' } }, d))
+                    ),
+                    e('div', { style: { display: 'grid', gridTemplateRows: 'repeat(7,' + CELL + 'px)', gridAutoFlow: 'column', gridAutoColumns: CELL + 'px', gap: GAP } },
+                    cells.map((d, i) => {
+                    if (!d) return e('span', { key: i });
+                    const k = dk(d);
+                    const list = byDay[k] || [];
+                    return e('button', {
+                    key: i,
+                    className: 'cell',
+                    title: fmtS(d) + ': ' + list.length + ' ' + word,
+                    onClick: () => setSel({ title: fmtS(d) + ', ' + year, list }),
+                    style: {
+                    width: CELL,
+                    height: CELL,
+                    background: heatColor(list.length, maxDay),
+                    outline: sel && sel.title === fmtS(d) + ', ' + year ? '1px solid ' + C.text : 'none'
+                    }
+                    });
+                    })
+                    )
+                    )
+                    ) : e('div', { className: 'overflow-x-auto' },
+                    e('table', { style: { borderCollapse: 'separate', borderSpacing: 3 } },
+                    e('thead', null,
+                    e('tr', null,
+                    e('th', null),
+                    MONTHS.map(m => e('th', { key: m, className: 'text-xs font-normal', style: { color: C.muted, fontSize: 10, width: 30 } }, m)),
+                    e('th', { className: 'text-xs font-normal pl-2', style: { color: C.muted, fontSize: 10 } }, 'Total')
+                    )
+                    ),
+                    e('tbody', null,
+                    matrix.length ? matrix.map(r => e('tr', { key: r.name },
+                    e('td', { className: 'text-xs pr-3 whitespace-nowrap', style: { color: C.text, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' } }, r.name),
+                    r.months.map((a, i) => e('td', { key: i, style: { padding: 0 } },
+                    e('button', {
+                    className: 'cell tabular-nums',
+                    onClick: () => setSel({ title: r.name + ', ' + MONTHS[i] + ' ' + year, list: a }),
+                    style: { width: 30, height: 20, fontSize: 10, background: heatColor(a.length, maxCell), color: a.length / maxCell > 0.5 ? C.dark : C.text }
+                    }, a.length || '')
+                    )),
+                    e('td', { className: 'text-xs pl-2 tabular-nums', style: { color: C.muted } }, r.total)
+                    )) : e('tr', null, e('td', { className: 'py-8 text-sm', style: { color: C.muted } }, 'No records in ' + year))
+                    )
+                    )
+                    )
+                ),
+                sel ? e(Panel, {
+                    title: sel.title,
+                    hint: sel.list.length + ' ' + word,
+                    right: e('button', { onClick: () => setSel(null), className: 'btng text-xs px-3.5 py-1.5 rounded-full', style: { border: '1px solid ' + C.line, color: C.muted } }, 'Clear')
+                },
+                    e(Table, {
+                    minW: 560,
+                    rows: [...sel.list].sort((a, b) => b._d - a._d),
+                    onRow: r => onOpen({ type: src === 'completed' ? 'completed' : 'compliance', rec: r }),
+                    empty: 'No records here.',
+                    cols: src === 'completed' ? [
+                    { k: 'ticket', l: 'Ticket', r: r => e('span', { style: { color: C.acc } }, r.ticket || '—') }, { k: 'name', l: 'Customer' }, { k: 'mfr', l: 'Manufacturer' }, { k: 'fault', l: 'Fault' }, { k: 'closed', l: 'Completed', r: r => fmtD(r.closed) }
+                    ] : [
+                    { k: 'ticket', l: 'Ticket', r: r => e('span', { style: { color: C.acc } }, r.ticket || '—') }, { k: 'name', l: 'Customer' }, { k: 'mfr', l: 'Manufacturer' }, { k: 'cat', l: 'Status', r: r => e(Tag, { c: CAT[catOf(r)].c }, CAT[catOf(r)].l) }, { k: 'updated', l: 'Updated', r: r => fmtS(r.updated) + ', ' + fmtT(r.updated) }
+                    ]
+                    })
+                ) : null,
+                e(Panel, { title: 'Monthly totals, ' + year },
+                    e('div', { style: { height: 200 } },
+                    e(ResponsiveContainer, null,
+                    e(BarChart, { data: monthly, margin: { left: -20, right: 8, top: 8 } },
+                    e(CartesianGrid, { stroke: C.line, vertical: false }),
+                    e(XAxis, Object.assign({ dataKey: 'm' }, axisStyle)),
+                    e(YAxis, Object.assign({ allowDecimals: false }, axisStyle)),
+                    e(Tooltip, tipStyle),
+                    e(Bar, { dataKey: 'v', name: word, fill: C.acc, className: 'bar-acc', barSize: 18, radius: [2, 2, 0, 0], animationDuration: 900 })
+                    )
+                    )
+                    )
+                )
+            );
+        }
+
+        /* ---- Detail Drawer ---- */
+        function Drawer({ d, onClose }) {
+            if (!d) return null;
+            const r = d.rec;
+            const Row = ({ l, v }) => e('div', { className: 'flex justify-between gap-4 py-2.5 text-sm', style: { borderBottom: '1px solid ' + C.line } },
+                e('span', { style: { color: C.muted } }, l),
+                e('span', { className: 'text-right', style: { color: C.text, overflowWrap: 'anywhere' } }, v || '—')
+            );
+            const Block = ({ l, v }) => v ? e('div', { className: 'mt-4' },
+                e('div', { className: 'lbl mb-1' }, l),
+                e('p', { className: 'text-sm leading-relaxed', style: { color: C.text, whiteSpace: 'pre-wrap' } }, v)
+            ) : null;
+
+            return e('div', { className: 'fixed inset-0 z-50 flex justify-end' },
+                e('button', { 'aria-label': 'Close', onClick: onClose, className: 'absolute inset-0 w-full h-full', style: { background: 'rgba(4,14,19,0.72)' } }),
+                e('aside', { className: 'relative w-full max-w-md h-full overflow-y-auto p-6 fade', style: { background: C.panel, borderLeft: '1px solid ' + C.line } },
+                    e('div', { className: 'flex justify-between items-start gap-4' },
+                    e('div', null,
+                    e('div', { className: 'lbl' }, (d.type === 'compliance' ? 'Compliance check' : d.type === 'open' ? 'Open job' : 'Completed job') + ' · ' + (r.ticket || 'No ticket')),
+                    e('h2', { className: 'text-2xl font-semibold mt-1' }, r.name)
+                    ),
+                    e('button', { onClick: onClose, className: 'btng px-3 py-1 text-sm rounded-full', style: { border: '1px solid ' + C.line, color: C.muted } }, 'Esc')
+                    ),
+                    d.type === 'compliance' ? e(React.Fragment, null,
+                    e('div', { className: 'mt-5 p-4 rounded-lg', style: { border: '1px solid ' + CAT[catOf(r)].c } },
+                    e(Tag, { c: CAT[catOf(r)].c }, CAT[catOf(r)].l),
+                    e('p', { className: 'text-base mt-2', style: { color: C.text } }, verdict(r))
+                    ),
+                    e('div', { className: 'mt-4' },
+                    e(Row, { l: 'Manufacturer', v: r.mfr }),
+                    e(Row, { l: 'SLD required', v: r.sldReq ? (r.sldReq === 'yes' ? 'Yes' : 'No') : 'Blank' }),
+                    e(Row, { l: 'SLD done', v: r.sldDone ? 'Yes' : 'No' }),
+                    e(Row, { l: 'Compliance check done', v: r.cc ? 'Yes' : 'No' }),
+                    e(Row, { l: 'Last updated', v: r.updated ? fmtD(r.updated) + ', ' + fmtT(r.updated) + ' (' + ago(r.updated) + ')' : 'Before tracking started' })
+                    ),
+                    e(Block, { l: 'Notes', v: r.notes })
+                    ) : null,
+                    d.type === 'open' ? e(React.Fragment, null,
+                    e('div', { className: 'mt-5' },
+                    e(Stepper, { stage: stageOf(r) }),
+                    e('div', { className: 'text-xs mt-2', style: { color: C.acc } }, 'Step ' + (stageOf(r) + 1) + ': ' + STAGES[stageOf(r)])
+                    ),
+                    e('div', { className: 'mt-4' },
+                    e(Row, { l: 'Status', v: r.status || 'No status yet' }),
+                    e(Row, { l: 'System', v: r.sys }),
+                    e(Row, { l: 'Manufacturer', v: r.mfr }),
+                    e(Row, { l: 'Fault with', v: r.fault }),
+                    e(Row, { l: 'Logged', v: fmtD(r.logged) }),
+                    e(Row, { l: 'Last update', v: r.updated ? fmtD(r.updated) + ' (' + ago(r.updated) + ')' : '' }),
+                    e(Row, { l: 'Warranty lodged / RMA', v: r.wl }),
+                    e(Row, { l: 'Warranty reference', v: r.wr }),
+                    e(Row, { l: 'Technician', v: r.tech }),
+                    e(Row, { l: 'Technician visit', v: r.techVisit })
+                    ),
+                    e(Block, { l: 'Summary of fault', v: r.summary }),
+                    e(Block, { l: 'Action / notes', v: r.notes })
+                    ) : null,
+                    d.type === 'completed' ? e(React.Fragment, null,
+                    e('div', { className: 'mt-4' },
+                    e(Row, { l: 'System', v: r.sys }),
+                    e(Row, { l: 'Manufacturer', v: r.mfr }),
+                    e(Row, { l: 'Fault with', v: r.fault }),
+                    e(Row, { l: 'Logged', v: fmtD(r.logged) }),
+                    e(Row, { l: 'Completed', v: fmtD(r.closed) }),
+                    e(Row, { l: 'Days open', v: r.logged && r.closed && r.closed >= r.logged ? String(Math.round((r.closed - r.logged) / DAY)) : '' }),
+                    e(Row, { l: 'Technician', v: r.tech })
+                    ),
+                    e(Block, { l: 'Summary of fault', v: r.summary }),
+                    e(Block, { l: 'Action / notes', v: r.notes })
+                    ) : null
+                )
+            );
+        }
+
+        /* ---- Main Application Component ---- */
+        const TABS = ['Tech Support', 'Compliance & Booking', 'SLD', 'RMA Timeline', 'Heat Map'];
+
+        function App() {
+            const [tab, setTabRaw] = useState(0);
+            const [dir, setDir] = useState(1);
+            const [ind, setInd] = useState(null);
+            const tabRef = useRef(0);
+            const btnRefs = useRef([]);
+            const setTab = i => { setDir(i >= tabRef.current ? 1 : -1); tabRef.current = i; setTabRaw(i); };
+            const [open, setOpen] = useState(snapOpen);
+            const [completed, setCompleted] = useState(snapCompleted);
+            const [cc, setCc] = useState(snapCC);
+            const [sync, setSync] = useState({ state: 'loading', live: [], at: null });
+            const [drawer, setDrawer] = useState(null);
+            const [win, setWin] = useState(14);
+            const [toastMsg, setToastMsg] = useState('');
+            const searchRef = useRef(null);
+
+            const toast = useCallback(m => {
+                setToastMsg(m);
+                setTimeout(() => setToastMsg(''), 2200);
+            }, []);
+
+            const load = useCallback(async (manual) => {
+                setSync(s => ({ ...s, state: 'loading' }));
+                const base = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq';
+                // Method 1: CSV via fetch
+                const viaCSV = async (gid) => {
+                    const r = await fetch(base + '?tqx=out:csv&headers=1&gid=' + gid + '&cb=' + Date.now(), { cache: 'no-store' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    const t = await r.text();
+                    if (t.trim().startsWith('<')) throw new Error('not csv');
+                    return parseCSV(t);
+                };
+                // Method 2: JSONP script tag (no CORS needed; works from file:// and strict browsers)
+                const viaJSONP = (gid) => new Promise((resolve, reject) => {
+                    const cb = '__psg_' + gid + '_' + Date.now();
+                    const s = document.createElement('script');
+                    const done = () => { try { delete window[cb]; } catch (_) { window[cb] = undefined; } s.remove(); clearTimeout(to); };
+                    const to = setTimeout(() => { done(); reject(new Error('timeout')); }, 20000);
+                    window[cb] = (resp) => {
+                    done();
+                    if (!resp || resp.status === 'error' || !resp.table) return reject(new Error('gviz error'));
+                    const cell = c => (c == null ? '' : c.f != null ? String(c.f) : c.v == null ? '' : typeof c.v === 'boolean' ? (c.v ? 'TRUE' : 'FALSE') : String(c.v));
+                    const head = resp.table.cols.map(c => c.label || '');
+                    const body = resp.table.rows.map(r => (r.c || []).map(cell));
+                    resolve([head].concat(body));
+                    };
+                    s.onerror = () => { done(); reject(new Error('script blocked')); };
+                    s.src = base + '?tqx=out:json;responseHandler:' + cb + '&headers=1&gid=' + gid + '&cb=' + Date.now();
+                    document.head.appendChild(s);
+                });
+                const get = async (gid, parse) => {
+                    let rows;
+                    try { rows = await viaCSV(gid); } catch (err) { rows = await viaJSONP(gid); }
+                    const out = parse(rows);
+                    if (!out.length) throw new Error('empty');
+                    return out;
+                };
+
+                const res = await Promise.allSettled([
+                    get(GID.open, liveOpen),
+                    get(GID.completed, liveCompleted),
+                    get(GID.compliance, liveCC)
+                ]);
+
+                const live = [];
+                if (res[0].status === 'fulfilled') { setOpen(res[0].value); live.push('Open Jobs'); }
+                if (res[1].status === 'fulfilled') { setCompleted(res[1].value); live.push('Completed Jobs'); }
+                if (res[2].status === 'fulfilled') { setCc(res[2].value); live.push('Compliance Check'); }
+
+                setSync({ state: live.length === 3 ? 'live' : live.length ? 'partial' : 'snapshot', live, at: new Date() });
+                if (manual) toast(live.length ? 'Refreshed from Google Sheet' : 'Sheet unreachable, showing 5 Nov snapshot');
+            }, [toast]);
+
+            useEffect(() => {
+                load();
+                const t = setInterval(() => load(), 60000);
+                return () => clearInterval(t);
+            }, [load]);
+
+            useEffect(() => {
+                const h = ev => {
+                    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement && document.activeElement.tagName);
+                    if (ev.key === 'Escape') { setDrawer(null); if (typing) document.activeElement.blur(); return; }
+                    if (typing) return;
+                    if (/^[1-5]$/.test(ev.key)) setTab(+ev.key - 1);
+                    else if (ev.key === '/') { ev.preventDefault(); setTab(1); setTimeout(() => searchRef.current && searchRef.current.focus(), 60); }
+                    else if (ev.key.toLowerCase() === 'r') load(true);
+                };
+                window.addEventListener('keydown', h);
+                return () => window.removeEventListener('keydown', h);
+            }, [load]);
+
+            /* Sliding tab underline: measure the active tab button */
+            useEffect(() => {
+                const upd = () => { const el = btnRefs.current[tabRef.current]; if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth }); };
+                upd();
+                window.addEventListener('resize', upd);
+                if (document.fonts && document.fonts.ready) document.fonts.ready.then(upd);
+                return () => window.removeEventListener('resize', upd);
+            }, [tab]);
+
+            const badge = { live: { c: '#5BC9AF', l: 'LIVE' }, partial: { c: C.acc, l: 'PARTLY LIVE' }, snapshot: { c: C.acc, l: 'SNAPSHOT' }, loading: { c: C.onDarkMuted, l: 'SYNCING' } }[sync.state];
+            const pendingCount = cc.filter(r => !r.cc).length;
+
+            return e('div', { className: 'min-h-screen' },
+                e('div', { className: 'sticky top-0 z-40' },
+                    e('header', { style: { background: C.dark, borderBottom: '1px solid rgba(234,240,242,0.08)' } },
+                        e('div', { className: 'max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3' },
+                            e(Logo, null),
+                            e('div', { className: 'flex flex-wrap items-center gap-2' },
+                                e('span', { className: 'inline-flex items-center gap-2 px-2.5 py-1 text-xs font-semibold tracking-widest rounded-full', style: { color: badge.c, border: '1px solid rgba(234,240,242,0.22)' } },
+                                    e(Dot, { c: badge.c }),
+                                    badge.l
+                                ),
+                                sync.at && e('span', { className: 'text-xs hidden sm:inline', style: { color: C.onDarkMuted }, title: sync.live.length ? 'Live tabs: ' + sync.live.join(', ') : 'Could not reach Google Sheet' },
+                                    'Synced ' + sync.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                ),
+                                e('button', { onClick: () => load(true), className: 'hbd px-3.5 py-1.5 text-xs rounded-full', style: { border: '1px solid rgba(234,240,242,0.25)', color: C.onDark } },
+                                    e(Icon, { n: 'refresh', spin: sync.state === 'loading', className: 'mr-1.5' }),
+                                    'Refresh'
+                                ),
+                                e('a', { href: SHEET_LINK, target: '_blank', rel: 'noopener noreferrer', className: 'btnp px-3.5 py-1.5 text-xs font-semibold rounded-full', style: { background: C.acc, color: C.dark } },
+                                    'Open sheet ',
+                                    e(Icon, { n: 'external', className: 'ml-1' })
+                                )
+                            )
+                        )
+                    ),
+                    e('nav', { style: { background: C.panel, borderBottom: '1px solid ' + C.line } },
+                        e('div', { className: 'max-w-7xl mx-auto px-4 sm:px-6 flex overflow-x-auto relative' },
+                            TABS.map((t, i) => e('button', {
+                                key: t,
+                                onClick: () => setTab(i),
+                                className: 'px-4 py-3.5 text-sm whitespace-nowrap flex items-center gap-2',
+                                style: {
+                                    color: tab === i ? C.text : C.muted,
+                                    fontWeight: tab === i ? 600 : 400,
+                                    borderBottom: '2px solid ' + (tab === i ? C.acc : 'transparent'),
+                                    transition: 'color .15s, border-color .2s'
+                                }
+                            },
+                                e('span', { className: 'text-xs tabular-nums', style: { color: C.muted } }, i + 1),
+                                t,
+                                i === 1 && pendingCount > 0 ? e('span', { className: 'text-xs px-1.5 rounded-full tabular-nums', style: { background: C.red, color: '#FFFFFF' } }, pendingCount) : null
+                            ))
+                        )
+                    )
+                ),
+                sync.state !== 'live' && sync.state !== 'loading' ? e('div', { className: 'max-w-7xl mx-auto px-4 sm:px-6 mt-4' },
+                    e('div', { className: 'px-4 py-2.5 text-sm rounded-lg', style: { border: '1px solid ' + C.acc, background: 'rgba(242,169,0,0.08)', color: C.text } },
+                        e('span', { className: 'mr-2', style: { color: C.acc } }, e(Icon, { n: 'warn' })),
+                        sync.state === 'snapshot' ? 'Could not reach the live sheet. Showing static snapshot data.' : 'Live connection active for: ' + sync.live.join(', ') + '. Other tabs using snapshot data.'
+                    )
+                ) : null,
+                e('main', { key: tab, className: 'max-w-7xl mx-auto px-4 sm:px-6 py-6 fade' },
+                    tab === 0 ? e(TechTab, { open, completed, onOpen: setDrawer }) : null,
+                    tab === 1 ? e(ComplianceTab, { rows: cc, win, setWin, onOpen: setDrawer, searchRef, toast }) : null,
+                    tab === 2 ? e(SldTab, { rows: cc, win, setWin, onOpen: setDrawer }) : null,
+                    tab === 3 ? e(RmaTab, { open, onOpen: setDrawer }) : null,
+                    tab === 4 ? e(HeatTab, { completed, compliance: cc, onOpen: setDrawer }) : null
+                ),
+                e('footer', { className: 'max-w-7xl mx-auto px-4 sm:px-6 pb-8 flex flex-wrap justify-between gap-3 text-xs', style: { color: C.muted, borderTop: '1px solid ' + C.line, marginTop: 20, paddingTop: 14 } },
+                    e('span', null, 'Read-only · Open Jobs, Completed Jobs and Compliance Check · Refreshes every 60 s' + (sync.at ? ' · Last sync ' + fmtT(sync.at) : '')),
+                    e('span', null, 'Shortcuts: 1–5 tabs · / search queue · R refresh · Esc close')
+                ),
+                e(Drawer, { d: drawer, onClose: () => setDrawer(null) }),
+                toastMsg ? e('div', { className: 'fixed bottom-5 left-1/2 z-50 px-4 py-2 text-sm rounded-full fade', style: { transform: 'translateX(-50%)', background: C.acc, color: C.dark } }, toastMsg) : null
+            );
+        }
+
+        // Initialize and Render Application
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(App));
+    </script>
+</body>
+</html>
